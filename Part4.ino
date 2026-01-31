@@ -13,6 +13,10 @@ void setup() {
   // put your setup code here, to run once:
   Wire.begin(21, 22);
   Serial.begin(115200);
+  if (!io.begin()) {
+    Serial.println("I2C Expander not detected");
+    while (1);
+  }
   io.pinMode(buttonUp, INPUT);
   io.pinMode(buttonDown, INPUT);
   io.pinMode(buttonRight, INPUT);
@@ -22,19 +26,23 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (io.digitalRead(buttonUp) == LOW) {
+  if (io.digitalRead(buttonUp) == LOW && io.digitalRead(buttonLeft) == LOW) {
+    Serial.print("Top Left");
+  } else if (io.digitalRead(buttonUp) == LOW && io.digitalRead(buttonRight) == LOW) {
+    Serial.print("Top Right");
+  } else if (io.digitalRead(buttonDown) == LOW && io.digitalRead(buttonLeft) == LOW) {
+    Serial.print("Bottom Left");
+  } else if (io.digitalRead(buttonDown) == LOW && io.digitalRead(buttonRight) == LOW) {
+    Serial.print("Bottom Right");
+  } else if (io.digitalRead(buttonUp) == LOW) {
     Serial.print("Up");
-  }
-  if (io.digitalRead(buttonDown) == LOW) {
+  } else if (io.digitalRead(buttonDown) == LOW) {
     Serial.print("Down");
-  }
-  if (io.digitalRead(buttonRight) == LOW) {
+  } else if (io.digitalRead(buttonRight) == LOW) {
     Serial.print("Right");
-  }
-  if (io.digitalRead(buttonLeft) == LOW) {
+  } else if (io.digitalRead(buttonLeft) == LOW) {
     Serial.print("Left");
-  }
-  if (io.digitalRead(buttonCenter) == LOW) {
+  } else if (io.digitalRead(buttonCenter) == LOW) {
     Serial.print("Center");
   } 
   
