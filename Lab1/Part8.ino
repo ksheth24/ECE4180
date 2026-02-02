@@ -1,10 +1,10 @@
-#include <ESP32Servo.h>
+<ESP32Servo.h>
 
-Servo myServo;
+Servo myServo
 
 void setup() {
-  Serial.begin(115200);
-  myServo.attach(4);
+  // put your setup code here, to run once:
+  myServo.attach(8);
   pinMode(5, INPUT_PULLUP);
   pinMode(18, INPUT_PULLUP);
   pinMode(19, INPUT_PULLUP);
@@ -12,21 +12,18 @@ void setup() {
 }
 
 void loop() {
+  // put your main code here, to run repeatedly:5
   if (!digitalRead(5)) {
-    myServo.write(0);
-    Serial.println("0 Degree Angle");
-    delay(500);
-  } else if (!digitalRead(18)) {
-    myServo.write(45);
-    Serial.println("45 Degree Angle");
-    delay(500);
-  } else if (!digitalRead(19)) {
-    myServo.write(90);
-    Serial.println("90 Degree Angle");
-    delay(500);
-  } else if (!digitalRead(21)) {
-    myServo.write(135);
-    Serial.println("135 Degree Angle");
-    delay(500);
+
   }
+  if (!digitalRead(18)) {
+    
+  }
+  if (!digitalRead(19)) {
+    
+  }
+  if (!digitalRead(21)) {
+    
+  }
+  myservo.write(90);
 }
