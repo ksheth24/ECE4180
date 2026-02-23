@@ -108,71 +108,50 @@ void loop() {
     previous = true;
   }
   if (y < 5) {
-    y = 0;
+    y = 5;
     previous = true;
   }
   if (y > 122) {
     y = 122;
     previous = true;
   }
-  if (color == 0) {
-    uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCC);
+  uLCDSerial.write(0xFF);
+  uLCDSerial.write(0xE4);
+  uLCDSerial.write(0x00);          // row high byte
+  uLCDSerial.write(y / 8);        // row in character units
+  uLCDSerial.write(0x00);          // col high byte
+  uLCDSerial.write(x / 7);         // col in character units
 
+  uLCDSerial.write(0x00);
+  uLCDSerial.write(0x06);
+  if (xPrev == 1 && yPrev == 1) {
     // set x1
-    uLCDSerial.write(x >> 8);
-    uLCDSerial.write(x & 0xFF);
-
-    //set y1
-    uLCDSerial.write(y >> 8);
-    uLCDSerial.write(y & 0xFF);
-
-    // radius
+    uLCDSerial.write(0x52);
+    uLCDSerial.write(0x44);
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x05);
-
-    // color
+  } else if (xPrev == 1 && yPrev == -1) {
+    uLCDSerial.write(0x52);
+    uLCDSerial.write(0x55);
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x1F);
-  } else if (color == 1) {
-    uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCC);
-
-    // set x1
-    uLCDSerial.write(x >> 8);
-    uLCDSerial.write(x & 0xFF);
-
-    //set y1
-    uLCDSerial.write(y >> 8);
-    uLCDSerial.write(y & 0xFF);
-
-    // radius
+  } else if (xPrev == -1 && yPrev == 1) {
+    uLCDSerial.write(0x4C);
+    uLCDSerial.write(0x44);
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x05);
-
-    // color
-    uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xFF);
-  } else {
-    uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCC);
-
-    // set x1
-    uLCDSerial.write(x >> 8);
-    uLCDSerial.write(x & 0xFF);
-
-    //set y1
-    uLCDSerial.write(y >> 8);
-    uLCDSerial.write(y & 0xFF);
-
-    // radius
-    uLCDSerial.write(0x00);
-    uLCDSerial.write(0x05);
-
-    // color
-    uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xE0);
   }
+  else if (xPrev == -1 && yPrev == -1) {
+    uLCDSerial.write(0x4C);
+    uLCDSerial.write(0x55);
+    uLCDSerial.write(0x00);
+  } else if (xPrev == 1) {
+      uLCDSerial.write(0x52);
+  } else if (xPrev == -1) {
+    uLCDSerial.write(0x4C);
+  } else if (yPrev == 1) {
+    uLCDSerial.write(0x44);
+  } else {
+    uLCDSerial.write(0x55);
+  }
+
   delay(100);
   uLCDSerial.write(0xFF);
   uLCDSerial.write(0xD7);
