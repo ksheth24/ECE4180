@@ -69,32 +69,32 @@ void loop() {
     x=64;
     y=64;
   }
-  if (x > 0 && x < 127 && y > 0 && y < 127) {
+  if (x > 5 && x < 122 && y > 5 && y < 122) {
     previous = false;
   } else if (!previous) {
     previous = true;
     color = (color + 1) % 3;
   }
-  if (x < 0) {
-    x = 0;
+  if (x < 5) {
+    x = 5;
     previous = true;
   }
-  if (x > 127) {
-    x = 127;
+  if (x > 122) {
+    x = 122;
     previous = true;
   }
-  if (y < 0) {
-    y = 0;
+  if (y < 5) {
+    y = 5;
     previous = true;
   }
-  if (y > 127) {
-    y = 127;
+  if (y > 122) {
+    y = 122;
     previous = true;
   }
   if (color == 0) {
     // draw filled circle
     uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -106,7 +106,7 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0x00);
@@ -115,7 +115,7 @@ void loop() {
     // Display.gfx_CircleFilled(x, y, 5, BLUE);
   } else if (color == 1) {
     uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -127,7 +127,7 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0xFF);
@@ -135,7 +135,7 @@ void loop() {
     // Display.gfx_CircleFilled(x, y, 5, WHITE);
   } else {
      uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -147,7 +147,7 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0xFF);
