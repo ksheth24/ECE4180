@@ -1,7 +1,10 @@
 #include <Wire.h>
+#include <ICM_20948.h>
 #include <Adafruit_MPR121.h>
 
 #define INTR 20
+#define AD0_VAL 1
+ICM_20948_I2C myICM;
 
 Adafruit_MPR121 cap = Adafruit_MPR121();
 #ifndef _BV
@@ -14,6 +17,9 @@ void setup() {
 
   Wire.begin(23, 22);
   Wire.setClock(400000);
+  myICM.begin(Wire, AD0_VAL);
+  Serial.println("ICM Configed");
+
 
   if (!cap.begin(0x5A)) {
     Serial.println("MPR121 not found");
@@ -34,6 +40,17 @@ void loop() {
       Serial.print(" Key ");
       Serial.print(i);
       Serial.println(" touched");
+    }
+  }
+  if (myICM.dataReady()) {
+    Serial.println("Data Recieved");
+    myICM.getAGMT();
+    if (myICM.accX() > 400) {
+      
+    } else if (myICM.accX() < -400) {
+      
+    } else if (myICM.accY() > 400) {
+      
     }
   }
   delay(100);
