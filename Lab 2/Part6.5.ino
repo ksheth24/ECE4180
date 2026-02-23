@@ -1,5 +1,4 @@
-#include <Goldelox_Serial_4DLib.h>
-#include <Goldelox_Const4D.h>
+#include <HardwareSerial.h>
 
 #define buttonUp 6
 #define buttonDown 10
@@ -13,10 +12,10 @@
 #define RX 17
 
 
-Goldelox_Serial_4DLib Display(&DisplaySerial);
+HardwareSerial uLCDSerial(1);
 
-int x = 64;
-int y = 64;
+uint16_t x = 64;
+uint16_t y = 64;
 int color = 0;
 bool previous = false;
 bool automatic = false;
@@ -31,18 +30,18 @@ void setup() {
   pinMode(buttonLeft, INPUT);
   pinMode(buttonCenter, INPUT);
 
-  DisplaySerial.begin(9600, SERIAL_8N1, RX, TX);
-  Display.TimeLimit4D = 500;
-  Display.gfx_Cls();
+  uLCDSerial.begin(9600, SERIAL_8N1, RX, TX);
+  // Display.TimeLimit4D = 500;
+  uLCDSerial.write(0xFF);
+  uLCDSerial.write(0xD7);
 }
-
 void loop() {
   // put your main code here, to run repeatedly:
   if (automatic) {
     x += 5 * xPrev;
     y += 5 * yPrev;
   }
-  else if (!automatic && digitalRead(buttonUp) == LOW && digitalRead(buttonLeft) == LOW) {
+  if (!automatic && digitalRead(buttonUp) == LOW && digitalRead(buttonLeft) == LOW) {
     Serial.println("Top Left");
     x -= 5;
     y -= 5;
@@ -84,11 +83,15 @@ void loop() {
     x -= 5;
     xPrev = -1;
     yPrev = 0;
-  } else if (!automatic && digitalRead(buttonCenter) == LOW) {
+  } else if (digitalRead(buttonCenter) == LOW) {
     Serial.println("Center");
-    automatic = !automatic;
+    if (automatic) {
+      automatic = false;
+    } else {
+      automatic = true;
+    }
   }
-  if (x > 0 && x < 127 && y > 0 && y < 127) {
+  if (x > 5 && x < 122 && y > 5 && y < 122) {
     previous = false;
   } else if (!previous) {
     previous = true;
@@ -96,25 +99,25 @@ void loop() {
     xPrev *= -1;
     yPrev *= -1;
   }
-  if (x < 0) {
-    x = 0;
+  if (x < 5) {
+    x = 5;
     previous = true;
   }
-  if (x > 127) {
-    x = 127;
+  if (x > 122) {
+    x = 122;
     previous = true;
   }
-  if (y < 0) {
+  if (y < 5) {
     y = 0;
     previous = true;
   }
-  if (y > 127) {
-    y = 127;
+  if (y > 122) {
+    y = 122;
     previous = true;
   }
   if (color == 0) {
     uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -126,14 +129,14 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0x00);
     uLCDSerial.write(0x1F);
   } else if (color == 1) {
     uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -145,14 +148,14 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0xFF);
     uLCDSerial.write(0xFF);
   } else {
     uLCDSerial.write(0xFF);
-    uLCDSerial.write(0xCF);
+    uLCDSerial.write(0xCC);
 
     // set x1
     uLCDSerial.write(x >> 8);
@@ -164,12 +167,13 @@ void loop() {
 
     // radius
     uLCDSerial.write(0x00);
-    uLCDSerial.write(0x0F);
+    uLCDSerial.write(0x05);
 
     // color
     uLCDSerial.write(0xFF);
     uLCDSerial.write(0xE0);
   }
   delay(100);
-  Display.gfx_Cls();
+  uLCDSerial.write(0xFF);
+  uLCDSerial.write(0xD7);
 }
