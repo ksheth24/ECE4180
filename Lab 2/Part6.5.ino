@@ -11,7 +11,6 @@
 #define TX 16
 #define RX 17
 
-
 HardwareSerial uLCDSerial(1);
 
 uint16_t x = 64;
@@ -31,67 +30,71 @@ void setup() {
   pinMode(buttonCenter, INPUT);
 
   uLCDSerial.begin(9600, SERIAL_8N1, RX, TX);
-  // Display.TimeLimit4D = 500;
   uLCDSerial.write(0xFF);
   uLCDSerial.write(0xD7);
 }
+
 void loop() {
-  // put your main code here, to run repeatedly:
   if (automatic) {
     x += 5 * xPrev;
     y += 5 * yPrev;
   }
+
   if (!automatic && digitalRead(buttonUp) == LOW && digitalRead(buttonLeft) == LOW) {
     Serial.println("Top Left");
-    x -= 5;
-    y -= 5;
-    xPrev = -1;
-    yPrev = -1;
+    x -= 5; y -= 5;
+    xPrev = -1; yPrev = -1;
   } else if (!automatic && digitalRead(buttonUp) == LOW && digitalRead(buttonRight) == LOW) {
     Serial.println("Top Right");
-    x += 5;
-    y -= 5;
+    x += 5; y -= 5;
+    xPrev = 1; yPrev = -1;
   } else if (!automatic && digitalRead(buttonDown) == LOW && digitalRead(buttonLeft) == LOW) {
     Serial.println("Bottom Left");
-    x -= 5;
-    y += 5;
-    xPrev = -1;
-    yPrev = 1;
+    x -= 5; y += 5;
+    xPrev = -1; yPrev = 1;
   } else if (!automatic && digitalRead(buttonDown) == LOW && digitalRead(buttonRight) == LOW) {
     Serial.println("Bottom Right");
-    x += 5;
-    y += 5;
-    xPrev = 1;
-    yPrev = 1;
+    x += 5; y += 5;
+    xPrev = 1; yPrev = 1;
   } else if (!automatic && digitalRead(buttonUp) == LOW) {
     Serial.println("Up");
     y -= 5;
-    xPrev = 0;
-    yPrev = -1;
+    xPrev = 0; yPrev = -1;
   } else if (!automatic && digitalRead(buttonDown) == LOW) {
     Serial.println("Down");
     y += 5;
-    xPrev = 0;
-    yPrev = 1;
+    xPrev = 0; yPrev = 1;
   } else if (!automatic && digitalRead(buttonRight) == LOW) {
     Serial.println("Right");
     x += 5;
-    xPrev = 1;
-    yPrev = 0;
+    xPrev = 1; yPrev = 0;
   } else if (!automatic && digitalRead(buttonLeft) == LOW) {
     Serial.println("Left");
     x -= 5;
-    xPrev = -1;
-    yPrev = 0;
+    xPrev = -1; yPrev = 0;
   } else if (digitalRead(buttonCenter) == LOW) {
     Serial.println("Center");
-    if (automatic) {
-      automatic = false;
-    } else {
-      automatic = true;
-    }
+    automatic = !automatic;
   }
-  if (x > 5 && x < 122 && y > 5 && y < 122) {
+
+  // Word pixel width (~6px per char for the built-in font)
+  int wordPixelWidth;
+  if ((xPrev == 1 && yPrev == 1) || (xPrev == 1 && yPrev == -1)) {
+    wordPixelWidth = 11 * 6; // "Lower Right" / "Upper Right"
+  } else if ((xPrev == -1 && yPrev == 1) || (xPrev == -1 && yPrev == -1)) {
+    wordPixelWidth = 10 * 6; // "Lower Left" / "Upper Left"
+  } else if (xPrev == 1 || xPrev == -1) {
+    wordPixelWidth = 5 * 6;  // "Right" / "Left"
+  } else if (yPrev == 1) {
+    wordPixelWidth = 4 * 6;  // "Down"
+  } else {
+    wordPixelWidth = 2 * 6;  // "Up"
+  }
+
+  int xMax = 128 - wordPixelWidth;
+  int yMax = 120;
+
+  if (x > 5 && x < xMax && y > 5 && y < yMax) {
     previous = false;
   } else if (!previous) {
     previous = true;
@@ -99,57 +102,105 @@ void loop() {
     xPrev *= -1;
     yPrev *= -1;
   }
-  if (x < 5) {
-    x = 5;
-    previous = true;
-  }
-  if (x > 122) {
-    x = 122;
-    previous = true;
-  }
-  if (y < 5) {
-    y = 5;
-    previous = true;
-  }
-  if (y > 122) {
-    y = 122;
-    previous = true;
-  }
+
+  if (x < 5)    { x = 5;    previous = true; }
+  if (x > xMax) { x = xMax; previous = true; }
+  if (y < 5)    { y = 5;    previous = true; }
+  if (y > yMax) { y = yMax; previous = true; }
+
+  // Move cursor
   uLCDSerial.write(0xFF);
   uLCDSerial.write(0xE4);
-  uLCDSerial.write(0x00);          // row high byte
-  uLCDSerial.write(y / 8);        // row in character units
-  uLCDSerial.write(0x00);          // col high byte
-  uLCDSerial.write(x / 7);         // col in character units
+  uLCDSerial.write(0x00);
+  uLCDSerial.write(y / 8);
+  uLCDSerial.write(0x00);
+  uLCDSerial.write(x / 6);
 
+  // Write string command
   uLCDSerial.write(0x00);
   uLCDSerial.write(0x06);
+
   if (xPrev == 1 && yPrev == 1) {
-    // set x1
-    uLCDSerial.write(0x52);
-    uLCDSerial.write(0x44);
-    uLCDSerial.write(0x00);
+    // "Lower Right"
+    uLCDSerial.write(0x4C); // L
+    uLCDSerial.write(0x6F); // o
+    uLCDSerial.write(0x77); // w
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x72); // r
+    uLCDSerial.write(0x20); // (space)
+    uLCDSerial.write(0x52); // R
+    uLCDSerial.write(0x69); // i
+    uLCDSerial.write(0x67); // g
+    uLCDSerial.write(0x68); // h
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
   } else if (xPrev == 1 && yPrev == -1) {
-    uLCDSerial.write(0x52);
-    uLCDSerial.write(0x55);
-    uLCDSerial.write(0x00);
+    // "Upper Right"
+    uLCDSerial.write(0x55); // U
+    uLCDSerial.write(0x70); // p
+    uLCDSerial.write(0x70); // p
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x72); // r
+    uLCDSerial.write(0x20); // (space)
+    uLCDSerial.write(0x52); // R
+    uLCDSerial.write(0x69); // i
+    uLCDSerial.write(0x67); // g
+    uLCDSerial.write(0x68); // h
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
   } else if (xPrev == -1 && yPrev == 1) {
-    uLCDSerial.write(0x4C);
-    uLCDSerial.write(0x44);
-    uLCDSerial.write(0x00);
-  }
-  else if (xPrev == -1 && yPrev == -1) {
-    uLCDSerial.write(0x4C);
-    uLCDSerial.write(0x55);
-    uLCDSerial.write(0x00);
+    // "Lower Left"
+    uLCDSerial.write(0x4C); // L
+    uLCDSerial.write(0x6F); // o
+    uLCDSerial.write(0x77); // w
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x72); // r
+    uLCDSerial.write(0x20); // (space)
+    uLCDSerial.write(0x4C); // L
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x66); // f
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
+  } else if (xPrev == -1 && yPrev == -1) {
+    // "Upper Left"
+    uLCDSerial.write(0x55); // U
+    uLCDSerial.write(0x70); // p
+    uLCDSerial.write(0x70); // p
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x72); // r
+    uLCDSerial.write(0x20); // (space)
+    uLCDSerial.write(0x4C); // L
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x66); // f
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
   } else if (xPrev == 1) {
-      uLCDSerial.write(0x52);
+    // "Right"
+    uLCDSerial.write(0x52); // R
+    uLCDSerial.write(0x69); // i
+    uLCDSerial.write(0x67); // g
+    uLCDSerial.write(0x68); // h
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
   } else if (xPrev == -1) {
-    uLCDSerial.write(0x4C);
+    // "Left"
+    uLCDSerial.write(0x4C); // L
+    uLCDSerial.write(0x65); // e
+    uLCDSerial.write(0x66); // f
+    uLCDSerial.write(0x74); // t
+    uLCDSerial.write(0x00); // null
   } else if (yPrev == 1) {
-    uLCDSerial.write(0x44);
+    // "Down"
+    uLCDSerial.write(0x44); // D
+    uLCDSerial.write(0x6F); // o
+    uLCDSerial.write(0x77); // w
+    uLCDSerial.write(0x6E); // n
+    uLCDSerial.write(0x00); // null
   } else {
-    uLCDSerial.write(0x55);
+    // "Up"
+    uLCDSerial.write(0x55); // U
+    uLCDSerial.write(0x70); // p
+    uLCDSerial.write(0x00); // null
   }
 
   delay(100);
