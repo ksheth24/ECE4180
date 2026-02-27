@@ -16,6 +16,7 @@ String s = "";
 
 void setup() {
   // put your setup code here, to run once:
+  Serial.begin(115200);
   SenderSerial.begin(9600, SERIAL_8N1, 16, 17);
   Wire.begin(23, 22);
   Wire.setClock(400000);
@@ -38,9 +39,8 @@ void loop() {
   for (int i = 0; i < 12; i++) {
     if (touched & _BV(i)) {
       if (i == 10) {
-        SenderSerial.println(s);
-      }
-      if (i == 11) {
+        SenderSerial.println(s.toInt());
+      } else if (i == 11) {
         s = s.substring(0, s.length() - 1);
       } else {
         s += i;
@@ -51,5 +51,5 @@ void loop() {
       Serial.println(s);
     }
   }
-
+  delay(100);
 }
