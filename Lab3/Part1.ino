@@ -36,12 +36,6 @@ uint32_t pixelColors[6] = {
   pixel.Color(255, 165, 0)   // Orange
 };
 
-#define BUTTON_PIN1 4
-#define BUTTON_PIN2 5
-#define BUTTON_PIN3 6
-#define BUTTON_PIN4 7
-#define ENTER 1
-
 #define CODEMAKER
 #define CODEBREAKER
 #include <ECE4180MasterMind.h>
@@ -60,8 +54,39 @@ int currentColor = 0;
 // or timestamps for debouncing               //
 //============================================//
 
+void IRAM_ATTR navISR(void* arg) {
+  int pin = (int)arg;
+  if (pin == buttonUp) {
+    color1 = (color1 + 1) % 6;
+    currentColor = color1;
+  } else if (pin == buttonDown) {
+    color2 = (color2 + 1) % 6;
+    currentColor = color2;
+  } else if (pin == buttonLeft) {
+    color3 = (color3 + 1) % 6;
+    currentColor = color3;
+  } else {
+    color4 = (color4 + 1) % 6;
+    currentColor = color4;
+  }
+  pixel.setPixelColor(0, pixelColors[currentColor]);
+  // pixel.show();
+  player.move.playerGuess[0] = color1;
+  player.move.playerGuess[1] = color2;
+  player.move.playerGuess[2] = color3;
+  player.move.playerGuess[3] = color4;
+  player.printGuess();
+}
+
+void IRAM_ATTR submit() {
+  Serial.println("Submitted");
+
+  player.notify();
+  host.move_callBack();
+}
+
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Starting stuff");
 
   player.setup();
@@ -74,7 +99,6 @@ void setup() {
   //============================================//
   // TODO: Set-up your interrupts               //
   //============================================//
-  Serial.begin(115200);
   pinMode(buttonUp, INPUT);
   pinMode(buttonDown, INPUT);
   pinMode(buttonRight, INPUT);
@@ -85,62 +109,32 @@ void setup() {
   attachInterruptArg(buttonDown, navISR, (void*)buttonDown, FALLING);
   attachInterruptArg(buttonLeft, navISR, (void*)buttonLeft, FALLING);
   attachInterruptArg(buttonRight, navISR, (void*)buttonRight, FALLING);
-  attachInterupt(buttonCenter, submit, FALLING);
+  attachInterrupt(buttonCenter, submit, FALLING);
 
   pixel.begin();
   pixel.setBrightness(20);
 }
 
 void loop() {
-  if (player.move.turn){
-    Serial.println("Player can go now");
-  } else {
-    Serial.println("Game has been reset");
-  }
+  // if (player.move.turn){
+  //   Serial.println("Player can go now");
+  // } else {
+  //   Serial.println("Game has been reset");
+  // }
 
   //============================================//
   // TODO: Comment out and replace this line    //
   // with ISR-based button handler              //
-  while (!player.makeGuess());
+  // while (!player.makeGuess());
   //============================================//
-  
-  Serial.println("Submitted");
-  player.printGuess();
 
-  // Player lets the host know that they have made a guess
-  player.notify();
-
-  // After notify, move_callBack is called on the host side
-  host.move_callBack();
-  
+  pixel.show();
+  delay(100);
 }
 
 //============================================//
 // TODO: Define and handle your interrupts    //
 //============================================//
-
-void IRAM_ATTR navISR(void* arg) {
-  int pin = (int)arg;
-  currentColor = (currentColor + 1) % 6
-  if (pin == buttonUp) {
-    color1 = currentColor;
-  }
-  else if (pin == buttonDown) {
-    color2 = currentColor;
-  } else if (pin == buttonLeft) {
-    color3 = currentColor;
-  } else {
-    color4 = currentColor;
-  }
-  pixel.setPixelColor(0, pixelColors[currentColor]);
-  pixel.show();
-}
-
-void IRAM_ATTR submit() {
-  player.move.playerGuess[0] = color1;
-  player.move.playerGuess[1] = color2;
-  player.move.playerGuess[2] = color3;
-  player.move.playerGuess[3] = color4;
 
 // Mimic the implementation of throwing the results flag
 bool CodeMaker::throwResultsFlag(bool ongoing){
@@ -160,7 +154,7 @@ void CodeMaker::move_callBack(){
   uint8_t results[2];
   host.checkGuess(results, playersGuess);
   host.printCode(); // Print actual code for reference
-  Serial.printf("Results: %d | %d \n", results[0], results[1]);
+  // Serial.printf("Results: %d | %d \n", results[0], results[1]);
   
   if (results[0] == 4) {
     host.endGame(); // Don't worry about this for the main BLE parts, you'll implement this for extra credit
