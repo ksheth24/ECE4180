@@ -85,7 +85,7 @@ void setup() {
   attachInterruptArg(buttonDown, navISR, (void*)buttonDown, FALLING);
   attachInterruptArg(buttonLeft, navISR, (void*)buttonLeft, FALLING);
   attachInterruptArg(buttonRight, navISR, (void*)buttonRight, FALLING);
-  attachInterupt(buttonCenter, isr2, FALLING);
+  attachInterupt(buttonCenter, submit, FALLING);
 
   pixel.begin();
   pixel.setBrightness(20);
