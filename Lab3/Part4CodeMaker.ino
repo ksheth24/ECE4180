@@ -1,4 +1,3 @@
-
 /**
  * @file NimBLE_Server_Switching.ino
  * @author H2zero
@@ -11,7 +10,6 @@
  * (Part 5)
  * @see Course website, Canvas, GitHub or PowerPoint slides for more details
  */
-
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
@@ -50,7 +48,6 @@ int connectedCount = 0;
 // Global flags for the state machine
 static NimBLEAddress addrToConnect;
 
-
 /**  None of these are required as they will be handled by the library with defaults. **
  **                       Remove as you see fit for your needs                        */
 class ClientCallbacks : public NimBLEClientCallbacks {
@@ -78,60 +75,19 @@ bool connectToServer(NimBLEAddress addr) {
     // device array for future use          //
     // Follow the previous starter code     //
     //======================================//
-
-    if (NimBLEDevice::getCreatedClientCount()) {
-
-        pClient = NimBLEDevice::getClientByPeerAddress(
-            advDevice->getAddress());
-
-        if (pClient) {
-
-            if (!pClient->connect(advDevice, false)) {
-                Serial.println("Reconnect failed");
-                return false;
-            }
-
-            Serial.println("Reconnected client");
-        }
-        else {
-            pClient = NimBLEDevice::getDisconnectedClient();
-        }
-    }
-
     if (!pClient) {
-
-        if (NimBLEDevice::getCreatedClientCount()
-            >= NIMBLE_MAX_CONNECTIONS) {
-
-            Serial.println("Max clients reached");
-            return false;
-        }
-
-        pClient = NimBLEDevice::createClient();
-
-        Serial.println("New client created");
-
-        pClient->setClientCallbacks(&clientCallbacks, false);
-
-        pClient->setConnectionParams(12, 12, 0, 150);
-        pClient->setConnectTimeout(5000);
-
-        if (!pClient->connect(advDevice)) {
-
-            NimBLEDevice::deleteClient(pClient);
-
-            Serial.println("Failed to connect");
-
-            return false;
-        }
+        Serial.println("Failed to create client");
+        return false;
     }
 
-    if (!pClient->isConnected()) {
+    pClient->setClientCallbacks(&clientCallbacks, false);
+    pClient->setConnectionParams(12, 12, 0, 150);
+    pClient->setConnectTimeout(5000);
 
-        if (!pClient->connect(advDevice)) {
-            Serial.println("Failed to connect");
-            return false;
-        }
+    if (!pClient->connect(addr)) {
+        NimBLEDevice::deleteClient(pClient);
+        Serial.println("Failed to connect");
+        return false;
     }
 
     Serial.printf("Connected to: %s RSSI: %d\n",
@@ -139,38 +95,31 @@ bool connectToServer(NimBLEAddress addr) {
         pClient->getRssi());
 
     pSvc = pClient->getService(SERVICE_UUID);
-
-    if (pSvc) {
-        pChr = pSvc->getCharacteristic(CHAR_UUID);
-    }
-
-    if (pChr) {
-
-        /* Subscribe to server notifications */
-
-        pChr->subscribe(true, handleMove);
-
-        Serial.println("Subscribed to notifications");
-
-        for(int i=0;i<NIMBLE_MAX_CONNECTIONS;i++){
-
-        if(!players[i].connected){
-
-            players[i].pClient = pClient;
-            players[i].pChar = pChr;
-            players[i].connected = true;
-
-            Serial.printf("Player %d registered\n",i);
-
-            break;
-        }
-    }
-    }
-    else {
-
-        Serial.println("Characteristic not found");
+    if (!pSvc) {
+        Serial.println("Service not found");
+        NimBLEDevice::deleteClient(pClient);
         return false;
     }
+
+    pChr = pSvc->getCharacteristic(CHAR_UUID);
+    if (!pChr) {
+        Serial.println("Characteristic not found");
+        NimBLEDevice::deleteClient(pClient);
+        return false;
+    }
+
+    if (!pChr->subscribe(true, handleMove)) {
+        Serial.println("Failed to subscribe to notifications");
+        NimBLEDevice::deleteClient(pClient);
+        return false;
+    }
+
+    players[connectedCount].pClient = pClient;
+    players[connectedCount].pChar = pChr;
+    players[connectedCount].connected = true;
+
+    Serial.printf("Player %d registered\n", connectedCount);
+    connectedCount++;
 
     Serial.println("Ready!");
 
@@ -226,16 +175,12 @@ void handleMove(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pDat
     Serial.printf("Results -> Black: %d White: %d\n",
                   results[0], results[1]);
 
-    pChr->writeValue(results);
-
-    pChr->canNotify();
     //======================================//
     // TODO: Copy and paste working handler //
     // If you did previous part right, it   //
     // should be exactly the same           //
     //======================================//
-
-
+    pRemoteCharacteristic->writeValue(results, 2);
 }
 
 void setup() {
@@ -269,8 +214,8 @@ void setup() {
   //======================================//
   // TODO: Set-up your code-breaker here  //
   //======================================//
-    host.setup();
-    host.generateCode();
+  host.setup();
+  host.generateCode();
 }
 
 void loop() {
