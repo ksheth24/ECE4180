@@ -53,6 +53,9 @@ int color3 = 0;
 int color4 = 0;
 int currentColor = 0;
 
+bool colorChange = false;
+bool submitted = false;
+
 static NimBLEServer* pServer;
 
 NimBLECharacteristic* pCharacteristic = nullptr;
@@ -148,14 +151,13 @@ void IRAM_ATTR navISR(void* arg) {
   player.move.playerGuess[1] = color2;
   player.move.playerGuess[2] = color3;
   player.move.playerGuess[3] = color4;
+  colorChange = true;
 }
 
 void IRAM_ATTR submit() {
   Serial.println("Submitted");
+  submitted = true;
 
-  player.notify();
-  pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
-  pCharacteristic->notify();
 }
 
 
@@ -186,7 +188,8 @@ void setup(void) {
   // TODO: Configure your Characteristics here  //
   // Example below        
   NimBLEService* pBoardService = pServer->createService("2006");                      //
-  pCharacteristic = pBoardService->createCharacteristic("0001", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  pCharacteristic = pBoardService->createCharacteristic("0001", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::WRITE);
+  pCharacteristic->setCallbacks(&chrCallbacks);
   // Will require extra steps                   //
   //============================================//
   
@@ -228,7 +231,15 @@ void loop() {
   //   delay(1000);
   // }
   // //======================================//
-  player.printGuess();
+  if (colorChange)
+    player.printGuess();
+  if (submitted) {
+    player.notify();
+    pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
+    pCharacteristic->notify();
+  }
   pixel.show();
   delay(100);
+  colorChange = false;
+  submitted = false;
 }
