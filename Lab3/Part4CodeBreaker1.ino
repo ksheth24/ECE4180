@@ -1,14 +1,14 @@
+
 /**
- * @file NimBLE_Server.ino
+ * @file NimBLE_Server_Switching.ino
  * @author H2zero
  * @author Jason Hsiao
  * @author STUDENT NAME HERE
- * @date 12/27/2025
+ * @date 2/2/2025
  * @version 1.0
  *
- * @brief Starter Code for the BLE Server portion of ECE4180 Lab 3 (Part 3 & 4)
- * This part is re-usable for both parts, as long as you flash this code to both
- * MCUs (though you might need to change the device name).
+ * @brief Starter Code for the switching BLE Client portion of ECE4180 Lab 3
+ * (Part 5)
  * @see Course website, Canvas, GitHub or PowerPoint slides for more details
  */
 
@@ -16,226 +16,282 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
-#define CODEBREAKER
+#define CODEMAKER
 #include <ECE4180MasterMind.h>
 
-CodeBreaker player;
+// Matches the Player's UUIDs
+#define SERVICE_UUID "4180"
+#define CHAR_UUID "0001"  // Ensure Player uses this exact string or a hex UUID
 
+PlayerBuffer currentRow;
+CodeMaker host;
 
-//==============================================//
-// TODO: Define constants here                  //
-//==============================================//
-#include <Adafruit_NeoPixel.h>
+bool isConnected = false;
+bool waitingForFeedback = false;  // Is it the Dealer's turn to type?
 
-#define LED_PIN     8     // Data pin connected to onboard RGB LED
-#define NUM_LEDS    1     // Only one LED on board
+static const NimBLEAdvertisedDevice* advDevice;
+static bool doConnect = false;
+static uint32_t scanTimeMs = 5000; /** scan time in milliseconds, 0 = scan forever */
 
-Adafruit_NeoPixel pixel(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+/** Now we can read/write/subscribe the characteristics of the services we are interested in */
+NimBLERemoteService* pSvc = nullptr;
+NimBLERemoteCharacteristic* pChr = nullptr;
+NimBLERemoteDescriptor* pDsc = nullptr;
 
-uint32_t pixelColors[6] = {
-  pixel.Color(255, 0, 0),    // Red
-  pixel.Color(0, 0, 255),    // Blue
-  pixel.Color(0, 255, 0),    // Green
-  pixel.Color(255, 255, 0),  // Yellow
-  pixel.Color(128, 0, 128),  // Purple
-  pixel.Color(255, 165, 0)   // Orange
+struct Player {
+    NimBLEClient* pClient = nullptr;
+    NimBLERemoteCharacteristic* pChar = nullptr;
+    bool connected = false;
 };
 
-#define buttonUp 6
-#define buttonDown 10
-#define buttonLeft 21
-#define buttonRight 11
-#define buttonCenter 7
+Player players[3];
+int connectedCount = 0;
 
-int color1 = 0;
-int color2 = 0;
-int color3 = 0;
-int color4 = 0;
-int currentColor = 0;
+// Global flags for the state machine
+static NimBLEAddress addrToConnect;
 
-bool colorChange = false;
-bool submitted = false;
-
-static NimBLEServer* pServer;
-
-NimBLECharacteristic* pCharacteristic = nullptr;
 
 /**  None of these are required as they will be handled by the library with defaults. **
  **                       Remove as you see fit for your needs                        */
-class ServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
-
-    /**
-         *  We can use the connection handle here to ask for different connection parameters.
-         *  Args: connection handle, min connection interval, max connection interval
-         *  latency, supervision timeout.
-         *  Units; Min/Max Intervals: 1.25 millisecond increments.
-         *  Latency: number of intervals allowed to skip.
-         *  Timeout: 10 millisecond increments.
-         */
-    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+class ClientCallbacks : public NimBLEClientCallbacks {
+  void onConnect(NimBLEClient* pClient) override {
+    Serial.printf("Connected\n");
   }
 
-  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-    Serial.printf("Client disconnected - start advertising\n");
-    NimBLEDevice::startAdvertising();
+  void onDisconnect(NimBLEClient* pClient, int reason) override {
+    Serial.printf("%s Disconnected, reason = %d - Starting scan\n", pClient->getPeerAddress().toString().c_str(), reason);
+    NimBLEDevice::getScan()->start(scanTimeMs, false, true);
+    doConnect = true;
   }
 
-} serverCallbacks;
+} clientCallbacks;
 
-/** Handler class for characteristic actions */
-class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-    Serial.printf("%s : onRead(), value: %s\n",
-                  pCharacteristic->getUUID().toString().c_str(),
-                  pCharacteristic->getValue().c_str());
-  }
+bool connectToServer(NimBLEAddress addr) {
+    if (connectedCount >= 3) return false;
 
-  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-    Serial.printf("%s : onWrite(), value: %d, %d\n",
-                  pCharacteristic->getUUID().toString().c_str(),
-                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
-    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
-  }
+    Serial.printf("Connecting to %s...\n", addr.toString().c_str());
+    NimBLEClient* pClient = NimBLEDevice::createClient();
 
-  /**
-     *  The value returned in code is the NimBLE host return code.
-     */
-  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
-    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
-  }
+    //======================================//
+    // TODO: USING THE pClient, connect and //
+    // then add the pointer to connected    //
+    // device array for future use          //
+    // Follow the previous starter code     //
+    //======================================//
 
-  /** Peer subscribed to notifications/indications */
-  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
-    std::string str = "Client ID: ";
-    str += connInfo.getConnHandle();
-    str += " Address: ";
-    str += connInfo.getAddress().toString();
-    if (subValue == 0) {
-      str += " Unsubscribed to ";
-    } else if (subValue == 1) {
-      str += " Subscribed to notifications for ";
-    } else if (subValue == 2) {
-      str += " Subscribed to indications for ";
-    } else if (subValue == 3) {
-      str += " Subscribed to notifications and indications for ";
+    if (NimBLEDevice::getCreatedClientCount()) {
+
+        pClient = NimBLEDevice::getClientByPeerAddress(
+            advDevice->getAddress());
+
+        if (pClient) {
+
+            if (!pClient->connect(advDevice, false)) {
+                Serial.println("Reconnect failed");
+                return false;
+            }
+
+            Serial.println("Reconnected client");
+        }
+        else {
+            pClient = NimBLEDevice::getDisconnectedClient();
+        }
     }
-    str += std::string(pCharacteristic->getUUID());
 
-    Serial.printf("%s\n", str.c_str());
-  }
-} chrCallbacks;
+    if (!pClient) {
 
-void IRAM_ATTR navISR(void* arg) {
-  int pin = (int)arg;
-  if (pin == buttonUp) {
-    color1 = (color1 + 1) % 6;
-    currentColor = color1;
-  } else if (pin == buttonDown) {
-    color2 = (color2 + 1) % 6;
-    currentColor = color2;
-  } else if (pin == buttonLeft) {
-    color3 = (color3 + 1) % 6;
-    currentColor = color3;
-  } else {
-    color4 = (color4 + 1) % 6;
-    currentColor = color4;
-  }
-  pixel.setPixelColor(0, pixelColors[currentColor]);
-  player.move.playerGuess[0] = color1;
-  player.move.playerGuess[1] = color2;
-  player.move.playerGuess[2] = color3;
-  player.move.playerGuess[3] = color4;
-  colorChange = true;
+        if (NimBLEDevice::getCreatedClientCount()
+            >= NIMBLE_MAX_CONNECTIONS) {
+
+            Serial.println("Max clients reached");
+            return false;
+        }
+
+        pClient = NimBLEDevice::createClient();
+
+        Serial.println("New client created");
+
+        pClient->setClientCallbacks(&clientCallbacks, false);
+
+        pClient->setConnectionParams(12, 12, 0, 150);
+        pClient->setConnectTimeout(5000);
+
+        if (!pClient->connect(advDevice)) {
+
+            NimBLEDevice::deleteClient(pClient);
+
+            Serial.println("Failed to connect");
+
+            return false;
+        }
+    }
+
+    if (!pClient->isConnected()) {
+
+        if (!pClient->connect(advDevice)) {
+            Serial.println("Failed to connect");
+            return false;
+        }
+    }
+
+    Serial.printf("Connected to: %s RSSI: %d\n",
+        pClient->getPeerAddress().toString().c_str(),
+        pClient->getRssi());
+
+    pSvc = pClient->getService(SERVICE_UUID);
+
+    if (pSvc) {
+        pChr = pSvc->getCharacteristic(CHAR_UUID);
+    }
+
+    if (pChr) {
+
+        /* Subscribe to server notifications */
+
+        pChr->subscribe(true, handleMove);
+
+        Serial.println("Subscribed to notifications");
+
+        for(int i=0;i<NIMBLE_MAX_CONNECTIONS;i++){
+
+        if(!players[i].connected){
+
+            players[i].pClient = pClient;
+            players[i].pChar = pChr;
+            players[i].connected = true;
+
+            Serial.printf("Player %d registered\n",i);
+
+            break;
+        }
+    }
+    }
+    else {
+
+        Serial.println("Characteristic not found");
+        return false;
+    }
+
+    Serial.println("Ready!");
+
+    return true;
 }
 
-void IRAM_ATTR submit() {
-  submitted = true;
+/** Define a class to handle the callbacks when scan events are received */
+class ScanCallbacks : public NimBLEScanCallbacks {
+  void onResult(const NimBLEAdvertisedDevice* advertisedDevice) {
+    if (advertisedDevice->isAdvertisingService(NimBLEUUID(SERVICE_UUID))) {
+        
+        // Check if we already connected to this MAC address
+        for (int i = 0; i < connectedCount; i++) {
+            if (players[i].pClient->getPeerAddress().equals(advertisedDevice->getAddress())) {
+                return; // Already have this player
+            }
+        }
+
+        Serial.println("Found a new Mastermind Player!");
+        NimBLEDevice::getScan()->stop(); // Stop immediately
+        addrToConnect = advertisedDevice->getAddress();
+        doConnect = true;
+    }
+  }
+
+  /** Callback to process the results of the completed scan or restart it */
+  void onScanEnd(const NimBLEScanResults& results, int reason) override {
+    Serial.printf("Scan Ended, reason: %d, device count: %d; Restarting scan\n", reason, results.getCount());
+    NimBLEDevice::getScan()->start(scanTimeMs, false, true);
+  }
+} scanCallbacks;
+
+/** Notification / Indication receiving handler callback */
+void handleMove(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+  Serial.println("Notification received");
+
+    uint8_t playersGuess[4];
+
+    for (int i = 0; i < 4; i++) {
+        playersGuess[i] = pData[i];
+    }
+
+    Serial.printf("Guess: %d %d %d %d\n",
+                  playersGuess[0],
+                  playersGuess[1],
+                  playersGuess[2],
+                  playersGuess[3]);
+
+    uint8_t results[2];
+
+    host.checkGuess(results, playersGuess);
+
+    Serial.printf("Results -> Black: %d White: %d\n",
+                  results[0], results[1]);
+
+    pChr->writeValue(results);
+
+    pChr->canNotify();
+    //======================================//
+    // TODO: Copy and paste working handler //
+    // If you did previous part right, it   //
+    // should be exactly the same           //
+    //======================================//
+
+
 }
 
-
-void setup(void) {
+void setup() {
   Serial.begin(115200);
-  Serial.printf("Starting NimBLE Server\n");
-
-  pinMode(buttonUp, INPUT);
-  pinMode(buttonDown, INPUT);
-  pinMode(buttonRight, INPUT);
-  pinMode(buttonLeft, INPUT);
-  pinMode(buttonCenter, INPUT);
-
-  attachInterruptArg(buttonUp, navISR, (void*)buttonUp, FALLING);
-  attachInterruptArg(buttonDown, navISR, (void*)buttonDown, FALLING);
-  attachInterruptArg(buttonLeft, navISR, (void*)buttonLeft, FALLING);
-  attachInterruptArg(buttonRight, navISR, (void*)buttonRight, FALLING);
-  attachInterrupt(buttonCenter, submit, FALLING);
+  Serial.printf("Starting NimBLE Client\n");
 
   /** Initialize NimBLE and set the device name */
-  NimBLEDevice::init("Player1");
+  NimBLEDevice::init("NimBLE-Client");
 
+  /** Optional: set the transmit power */
+  NimBLEDevice::setPower(3); /** 3dbm */
+  NimBLEScan* pScan = NimBLEDevice::getScan();
 
-  pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(&serverCallbacks);
+  /** Set the callbacks to call when scan events occur, no duplicates */
+  pScan->setScanCallbacks(&scanCallbacks, false);
 
-  //============================================//
-  // TODO: Configure your Characteristics here  //
-  // Example below        
-  NimBLEService* pBoardService = pServer->createService("2006");                      //
-  pCharacteristic = pBoardService->createCharacteristic("0001", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::WRITE);
-  pCharacteristic->setCallbacks(&chrCallbacks);
-  // Will require extra steps                   //
-  //============================================//
-  
-
-  /** Start the services when finished creating all Characteristics and Descriptors */
-  pBoardService->start();
-
-  /** Create an advertising instance and add the services to the advertised data */
-  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-  pAdvertising->setName("Mastermind-Player1");  // TODO: Set a unique name here
-  pAdvertising->addServiceUUID(pBoardService->getUUID());
+  /** Set scan interval (how often) and window (how long) in milliseconds */
+  pScan->setInterval(100);
+  pScan->setWindow(100);
 
   /**
-     *  If your device is battery powered you may consider setting scan response
-     *  to false as it will extend battery life at the expense of less data sent.
+     * Active scan will gather scan response data from advertisers
+     *  but will use more energy from both devices
      */
-  pAdvertising->enableScanResponse(true);
-  pAdvertising->start();
+  pScan->setActiveScan(true);
 
-  Serial.printf("Advertising Started\n");
+  /** Start scanning for advertisers */
+  pScan->start(scanTimeMs);
+  Serial.printf("Scanning for peripherals\n");
 
   //======================================//
   // TODO: Set-up your code-breaker here  //
   //======================================//
-  player.setup();
+    host.setup();
+    host.generateCode();
 }
 
 void loop() {
-  /** Loop here and send notifications to connected peers */
-  
-  //======================================//
-  // TODO: Game Logic Here                //
-  // Example of how to use BLE below      //
-  // Comment this out if needed           //
-  // uint8_t message[] = "Good Luck everybody!! - Jason";
-  // while (1) {
-  //   pCharacteristic->setValue(message, sizeof(message) - 1);
-  //   pCharacteristic->notify();
-  //   delay(1000);
-  // }
-  // //======================================//
-  if (colorChange) {
-    player.printGuess();
-    colorChange = false;
-  }
-  if (submitted) {
-    Serial.println("Submitted");
-    player.notify();
-    pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
-    pCharacteristic->notify();
-    submitted = false;
-  }
-  pixel.show();
-  delay(100);
+    if (doConnect) {
+        doConnect = false;
+        
+        if (connectToServer(addrToConnect)) {
+            Serial.printf("Player %d ready!\n", connectedCount);
+        } else {
+            Serial.println("Connection failed. Retrying scan...");
+        }
+
+        // Delay to let the radio "settle" before scanning again
+        delay(500);
+
+        if (connectedCount < 3) {
+            NimBLEDevice::getScan()->start(0, false, true);
+        } else {
+            Serial.println("All players connected. Game on!");
+        }
+    }
+    
+    delay(10);
 }
