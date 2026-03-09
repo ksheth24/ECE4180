@@ -93,14 +93,10 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   }
 
   void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-    Serial.printf("%s : onWrite(), value: %s\n",
+    Serial.printf("%s : onWrite(), value: %d, %d\n",
                   pCharacteristic->getUUID().toString().c_str(),
-                  pCharacteristic->getValue().c_str());
-                  // Retrieve the feedback written by the Codemaker (Client)
-            std::string val = pCharacteristic->getValue();
-    //==============================================//
-    // TODO: Read the response from Codemaker here  //
-    //==============================================//
+                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
   }
 
   /**
@@ -155,9 +151,7 @@ void IRAM_ATTR navISR(void* arg) {
 }
 
 void IRAM_ATTR submit() {
-  Serial.println("Submitted");
   submitted = true;
-
 }
 
 
@@ -231,15 +225,17 @@ void loop() {
   //   delay(1000);
   // }
   // //======================================//
-  if (colorChange)
+  if (colorChange) {
     player.printGuess();
+    colorChange = false;
+  }
   if (submitted) {
+    Serial.println("Submitted");
     player.notify();
     pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
     pCharacteristic->notify();
+    submitted = false;
   }
   pixel.show();
   delay(100);
-  colorChange = false;
-  submitted = false;
 }
