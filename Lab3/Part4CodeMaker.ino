@@ -18,7 +18,7 @@
 #include <ECE4180MasterMind.h>
 
 // Matches the Player's UUIDs
-#define SERVICE_UUID "4180"
+#define SERVICE_UUID "2006"
 #define CHAR_UUID "0001"  // Ensure Player uses this exact string or a hex UUID
 
 PlayerBuffer currentRow;
@@ -40,9 +40,11 @@ struct Player {
     NimBLEClient* pClient = nullptr;
     NimBLERemoteCharacteristic* pChar = nullptr;
     bool connected = false;
+    int points = 0;
+    bool turn = false;
 };
 
-Player players[3];
+Player players[1];
 int connectedCount = 0;
 
 // Global flags for the state machine
@@ -174,13 +176,19 @@ void handleMove(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pDat
 
     Serial.printf("Results -> Black: %d White: %d\n",
                   results[0], results[1]);
+    players[0].points += results[0] * 5 +  results[1];
+    Serial.printf("Points: %d\n", players[0].points);
 
     //======================================//
     // TODO: Copy and paste working handler //
     // If you did previous part right, it   //
     // should be exactly the same           //
     //======================================//
-    pRemoteCharacteristic->writeValue(results, 2);
+    pRemoteCharacteristic->writeValue(results);
+    pChr->canNotify();
+    if (results[0] == 4) {
+        host.endGame();
+    }
 }
 
 void setup() {
