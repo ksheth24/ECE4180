@@ -187,18 +187,14 @@ void prePrune(uint8_t predictedStyle) {
           uniqueCount++;
         }
       }
-      if (predictedStyle == 1) {
-        if (isDescending == 0) {
-          active[i] = false;
-        }
-      } else if (predictedStyle == 2) {
-        if (maxV >= 3) {
-          active[i] = false;
-        }
-      } else {
-        if (uniqueCount == 2) {
-          active[i] = false;
-        }
+      if (predictedStyle == 0) {         
+          if (!isDescending) active[i] = false;
+      }
+      else if (predictedStyle == 1) {    
+          if (maxV > 2) active[i] = false;
+      }
+      else if (predictedStyle == 2) {    
+          if (uniqueCount != 2) active[i] = false;
       }
     }
 
@@ -215,12 +211,14 @@ void setup() {
 void loop() {
   // TODO: Run the AI Model a few times to get an idea of what random code the dealer is using
   // Remember to use generateBiasedCode(style) instead of generateCode()
-classifyDealerStyle(generateBiasedCode(dealerStyle));
-classifyDealerStyle(generateBiasedCode(dealerStyle));
-classifyDealerStyle(generateBiasedCode(dealerStyle));
-classifyDealerStyle(generateBiasedCode(dealerStyle));
-classifyDealerStyle(generateBiasedCode(dealerStyle));
-classifyDealerStyle(generateBiasedCode(dealerStyle));
+  for (int i = 0; i < 5; i++) {
+    uint8_t code[4];
+
+    dealer.generateBiasedCode(dealerStyle);
+    dealer.getCode(code);
+
+    classifyDealerStyle(code);
+  }
 
   // TODO: Decide what the model thinks is the best style
   // Any reasonable approach is fine, I did running average but majority vote is also great
