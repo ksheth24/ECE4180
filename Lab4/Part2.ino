@@ -215,12 +215,23 @@ void setup() {
 void loop() {
   // TODO: Run the AI Model a few times to get an idea of what random code the dealer is using
   // Remember to use generateBiasedCode(style) instead of generateCode()
-
+classifyDealerStyle(generateBiasedCode(dealerStyle));
+classifyDealerStyle(generateBiasedCode(dealerStyle));
+classifyDealerStyle(generateBiasedCode(dealerStyle));
+classifyDealerStyle(generateBiasedCode(dealerStyle));
+classifyDealerStyle(generateBiasedCode(dealerStyle));
+classifyDealerStyle(generateBiasedCode(dealerStyle));
 
   // TODO: Decide what the model thinks is the best style
   // Any reasonable approach is fine, I did running average but majority vote is also great
   int winningStyle = 0;
-  
+  if (classifierConfidence[0] > classifierConfidence[1] && classifierConfidence[0] > classifierConfidence[2]) {
+    winningStyle = 0;
+  } else if (classifierConfidence[1] > classifierConfidence[0] && classifierConfidence[1] > classifierConfidence[2]) {
+    winningStyle = 1;
+  } else {
+    winningStyle = 2;
+  }
 
   Serial.print("DEALER PROFILED: ");
   Serial.println(winningStyle == 0 ? "DESCENDING" : 
@@ -233,7 +244,7 @@ void loop() {
   // TODO: Run it again several times using the pre-prune function 
   // to narrow down the list of possibilities before starting guessing
   // You should notice a significant increase in efficiency after the initial pre-prune step
-  
+  prePrune(currentDealerStyle);
   while(1);     // Blocking while so this doesn't loop endlessly
 
 }
