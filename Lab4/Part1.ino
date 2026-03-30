@@ -17,7 +17,7 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (digitalRead(0)){
+  if (!digitalRead(0)){
     dealer.generateBiasedCode(dealerStyle);
     uint8_t code[4];
     dealer.printCode();
@@ -25,6 +25,7 @@ void loop() {
     classifyDealerStyle(code);
     delay(1000);
   }
+  dealerStyle = static_cast<uint>(random(0,3));
 }
 
 void classifyDealerStyle(uint8_t* code) {
