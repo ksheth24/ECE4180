@@ -211,15 +211,14 @@ void setup() {
 void loop() {
   // TODO: Run the AI Model a few times to get an idea of what random code the dealer is using
   // Remember to use generateBiasedCode(style) instead of generateCode()
+  
   for (int i = 0; i < 5; i++) {
     uint8_t code[4];
 
     dealer.generateBiasedCode(dealerStyle);
-    dealer.getCode(code);
-
+    dealer.getCode(code);    
     classifyDealerStyle(code);
   }
-
   // TODO: Decide what the model thinks is the best style
   // Any reasonable approach is fine, I did running average but majority vote is also great
   int winningStyle = 0;
@@ -242,7 +241,44 @@ void loop() {
   // TODO: Run it again several times using the pre-prune function 
   // to narrow down the list of possibilities before starting guessing
   // You should notice a significant increase in efficiency after the initial pre-prune step
-  prePrune(currentDealerStyle);
-  while(1);     // Blocking while so this doesn't loop endlessly
+  populateArray(possibilities, ARRAY_SIZE);
+
+// Pre-prune based on ML prediction
+prePrune(currentDealerStyle);
+
+// Get the actual secret ONCE
+uint8_t actual[4];
+dealer.getCode(actual);
+
+turns = 0;
+
+while (true) {
+    int guessIdx = getBestGuess();
+    uint8_t* guess = possibilities[guessIdx];
+
+    uint8_t result[2];
+
+    dealer.compare(result, actual, guess);
+
+    Serial.printf("Guess: %d %d %d %d\n",
+        guess[0], guess[1], guess[2], guess[3]);
+    Serial.printf("Right: %d %d %d %d\n",
+        actual[0], actual[1], actual[2], actual[3]);
+    Serial.printf("Results: %d | %d\n\n",
+        result[0], result[1]);
+
+    // solved
+    if (result[0] == 4) {
+        Serial.printf("I solved it in %d turns! Somethin' light. :)\n", turns);
+        delay(1000);
+        break;
+    }
+
+    // eliminate impossible codes
+    prune(guess, result);
+
+    turns++;
+  }
+  dealerStyle = static_cast<uint>(random(0,3));
 
 }
