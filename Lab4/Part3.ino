@@ -118,10 +118,11 @@ int getBestGuess() {
         }
     }
     
-    uint32_t low = *TIMG_TOLO_REG;
-    unint32_t high = *TIMG_TOHI_REG;
+    uint32_t low = *TIMG_T0LO_REG;
+    uint32_t high = *TIMG_T0HI_REG;
     uint64_t count = ((uint64_t)high << 32) | low;
-    Serial.printf("\nDone! Took %d ms. Best Index: %d\n", count, bestGuessIdx);
+    float realCount = count * 0.25;
+    Serial.printf("\nDone! Took %.2f ms. Best Index: %d\n", realCount, bestGuessIdx);
     return bestGuessIdx;
 }
 
@@ -249,6 +250,10 @@ void setup() {
 void loop() {
   // TODO: Run the AI Model a few times to get an idea of what random code the dealer is using
   // Remember to use generateBiasedCode(style) instead of generateCode()
+
+  classifierConfidence[0] = 0;
+  classifierConfidence[1] = 0;
+  classifierConfidence[2] = 0;
   
   for (int i = 0; i < 5; i++) {
     uint8_t code[4];
@@ -274,12 +279,12 @@ void loop() {
   delay(3000); // Delay for readability
 
   // I accidentally trained the model's outputs to be different from the inputs to the dealer
-  currentDealerStyle = (winningStyle == 0 ? 1 : winningStyle == 1 ? 0 : 2);  // Fixes the ordering, the model outputs are backwards
+  currentDealerStyle = winningStyle;  // Fixes the ordering, the model outputs are backwards
   
   // TODO: Run it again several times using the pre-prune function 
   // to narrow down the list of possibilities before starting guessing
   // You should notice a significant increase in efficiency after the initial pre-prune step
-  populateArray(possibilities, ARRAY_SIZE);
+populateArray(possibilities, ARRAY_SIZE);
 
 // Pre-prune based on ML prediction
 prePrune(currentDealerStyle);
@@ -290,7 +295,8 @@ dealer.getCode(actual);
 
 turns = 0;
 
-while (true) {
+while (turns < 10) {
+    *TIMG_T0UPDATE_REG = 0xFFFFFFFF;
     int guessIdx = getBestGuess();
     uint8_t* guess = possibilities[guessIdx];
 
@@ -308,6 +314,11 @@ while (true) {
     // solved
     if (result[0] == 4) {
         Serial.printf("I solved it in %d turns! Somethin' light. :)\n", turns);
+        *TIMG_T0LOADLO_REG = 0;
+        *TIMG_T0LOADHI_REG = 0;
+        *TIMG_T0LOAD_REG   = 0xFFFFFFFF;
+
+        *TIMG_T0CONFIG_REG |= (1 << 31);
         delay(1000);
         break;
     }
