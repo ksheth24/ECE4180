@@ -1,13 +1,43 @@
+#include <Arduino.h>
+#define BUTTON_PIN 7
+
+// --- Include whatever FreeRTOS libraries you might need ---
+
+#include <FreeRTOS.h>
+#include <Task.h>
+TaskHandle_t Task1;
+TaskHandle_t Task2;
+TaskHandle_t Task3;
+
+
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN 8        // or whatever your board uses
+#define NUM_PIXELS 1     // usually 1 for these labs
+
+Adafruit_NeoPixel pixel(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// --- Declare Semaphore and Mutex Stuff ---
+
+
+// --- Define MasterMind stuff ---
 #define CODEMAKER
+#define CODEBREAKER
 #include <ECE4180MasterMind.h>
 
-#include <DealerClassifier_inferencing.h>
-
 CodeMaker dealer;
+CodeBreaker player;
 
-#define ARRAY_SIZE 1296   // 6^4
-#define VECTOR_SIZE 4
-#define BASE 6
+
+// --- Define BLE stuff ---
+#include <NimBLEDevice.h>
+static NimBLEServer* pServer;
+
+NimBLECharacteristic* pCharacteristic = nullptr;
+
+// --- Define AI/ML stuff ---
+uint8_t* code = 0;
+
 
 uint8_t possibilities[ARRAY_SIZE][VECTOR_SIZE];
 bool active[ARRAY_SIZE];
@@ -20,8 +50,63 @@ float classifierConfidence[3] = {0, 0, 0}; // [descending, low_numbers, two_pair
 uint8_t dealerStyle; // Randomly generated dealer style
 uint8_t currentDealerStyle; // What the ML will recognize as the dealer's style
 
-// Use this as opposed to division because it's cheaper (I think)
-// Generates the tree
+// -------------------------------------------------------------------------
+// CORE 1: AI & ML TASKS
+// -------------------------------------------------------------------------
+
+// Task A: Constant ML Inference (Triggered by data)
+void mlInferenceTask(void *pvParameters) {
+    int uniqueCount = 0;
+    int isDescending = code[0] >= code[1] && code[1] >= code[2] && code[2] >= code[3];
+    int maxV = 0;
+    bool unique = false;
+    for (int i = 0; i < 4; i++) {
+      unique = true;
+      if (code[i] > maxV) {
+        maxV = code[i];
+      }
+      for (int j = i - 1; j >= 0; j--) {
+        if (code[j] == code[i]) {
+          unique = false;
+        }
+      }
+      if (unique) {
+        uniqueCount++;
+      }
+    }
+
+    // TODO: Populate a float array of features with the following order:
+    // code[0], code[1], code[2], code[3], uniqueCount, isDescending, maxV
+    float features[7];
+    features[0] = code[0];
+    features[1] = code[1];
+    features[2] = code[2];
+    features[3] = code[3];
+    features[4] = uniqueCount;
+    features[5] = isDescending;
+    features[6] = maxV;
+
+    // Wrap the features for the EON compiler
+    signal_t signal;
+    numpy::signal_from_buffer(features, 7, &signal);
+
+    // Run inference
+    ei_impulse_result_t result = { 0 };
+    EI_IMPULSE_ERROR res = run_classifier(&signal, &result, false);
+
+    if (res != EI_IMPULSE_OK) return;
+}
+
+// Button ISR (Required)
+void IRAM_ATTR handleButtonPress() {
+  Serial.println("yo");
+}
+
+// Task B: AI Guess Making (Triggered by Button)
+void aiGuessTask(void *pvParameters) {
+  
+}
+
 void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
   uint8_t counters[VECTOR_SIZE] = {0};
 
@@ -38,21 +123,6 @@ void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
       }
     }
   }
-}
-
-void prune(uint8_t* lastGuess, uint8_t* results) {
-    for (int i = 0; i < ARRAY_SIZE; i++) {
-        if (!active[i]) continue; // Already pruned
-
-        // "If possibilities[i] was the secret, what feedback would it give?"
-        uint8_t reference[2];
-        dealer.compare(reference, possibilities[i], lastGuess);
-
-        // Remove possible answers that do not match
-        if (reference[0] != results[0] || reference[1] != results[1]) {
-            active[i] = false; 
-        } 
-    }
 }
 
 int getBestGuess() {
@@ -105,61 +175,6 @@ int getBestGuess() {
     return bestGuessIdx;
 }
 
-void classifyDealerStyle(uint8_t* code) {
-    // TODO: See Part 1
-    int uniqueCount = 0;
-    int isDescending = code[0] >= code[1] && code[1] >= code[2] && code[2] >= code[3];
-    int maxV = 0;
-    bool unique = false;
-    for (int i = 0; i < 4; i++) {
-      unique = true;
-      if (code[i] > maxV) {
-        maxV = code[i];
-      }
-      for (int j = i - 1; j >= 0; j--) {
-        if (code[j] == code[i]) {
-          unique = false;
-        }
-      }
-      if (unique) {
-        uniqueCount++;
-      }
-    }
-
-    // TODO: Populate a float array of features with the following order:
-    // code[0], code[1], code[2], code[3], uniqueCount, isDescending, maxV
-    float features[7];
-    features[0] = code[0];
-    features[1] = code[1];
-    features[2] = code[2];
-    features[3] = code[3];
-    features[4] = uniqueCount;
-    features[5] = isDescending;
-    features[6] = maxV;
-
-    // Wrap the features for the EON compiler
-    signal_t signal;
-    numpy::signal_from_buffer(features, 7, &signal);
-
-    // Run inference
-    ei_impulse_result_t result = { 0 };
-    EI_IMPULSE_ERROR res = run_classifier(&signal, &result, false);
-
-    if (res != EI_IMPULSE_OK) return;
-
-    // Print the results (the Style Probabilities)
-    Serial.printf("Predictions (DSP: %d ms, NN: %d ms)\n", 
-                  result.timing.dsp, result.timing.classification);
-    
-    for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-        Serial.printf("    %s: %.2f\n", result.classification[ix].label, // Fixed the map backwards problem
-                                        result.classification[ix].value);
-        // TODO: Update your confidences with these classifications
-        classifierConfidence[ix] += result.classification[ix].value;
-        
-    }
-}
-
 void prePrune(uint8_t predictedStyle) {
     // TODO: Prune the array of possibilities to remove anything that doesn't match your recognized style
     // Similar to prune, but we're now removing things that don't match the given style
@@ -200,85 +215,188 @@ void prePrune(uint8_t predictedStyle) {
 
 }
 
+void prune(uint8_t* lastGuess, uint8_t* results) {
+    for (int i = 0; i < ARRAY_SIZE; i++) {
+        if (!active[i]) continue; // Already pruned
+
+        // "If possibilities[i] was the secret, what feedback would it give?"
+        uint8_t reference[2];
+        dealer.compare(reference, possibilities[i], lastGuess);
+
+        // Remove possible answers that do not match
+        if (reference[0] != results[0] || reference[1] != results[1]) {
+            active[i] = false; 
+        } 
+    }
+}
+
+
+// -------------------------------------------------------------------------
+// CORE 0: BLE & WEB TASK
+// Add whatever helper functions you might need
+// -------------------------------------------------------------------------
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
+
+    /**
+         *  We can use the connection handle here to ask for different connection parameters.
+         *  Args: connection handle, min connection interval, max connection interval
+         *  latency, supervision timeout.
+         *  Units; Min/Max Intervals: 1.25 millisecond increments.
+         *  Latency: number of intervals allowed to skip.
+         *  Timeout: 10 millisecond increments.
+         */
+    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+  }
+
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    Serial.printf("Client disconnected - start advertising\n");
+    NimBLEDevice::startAdvertising();
+  }
+
+} serverCallbacks;
+
+/** Handler class for characteristic actions */
+class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onRead(), value: %s\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue().c_str());
+  }
+
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onWrite(), value: %d, %d\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+  }
+
+  /**
+     *  The value returned in code is the NimBLE host return code.
+     */
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
+  }
+
+  /** Peer subscribed to notifications/indications */
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+    std::string str = "Client ID: ";
+    str += connInfo.getConnHandle();
+    str += " Address: ";
+    str += connInfo.getAddress().toString();
+    if (subValue == 0) {
+      str += " Unsubscribed to ";
+    } else if (subValue == 1) {
+      str += " Subscribed to notifications for ";
+    } else if (subValue == 2) {
+      str += " Subscribed to indications for ";
+    } else if (subValue == 3) {
+      str += " Subscribed to notifications and indications for ";
+    }
+    str += std::string(pCharacteristic->getUUID());
+
+    Serial.printf("%s\n", str.c_str());
+  }
+} chrCallbacks;
+
+void bleGameplayTask(void *pvParameters) {
+    Serial.println("Sent.");
+    player.notify();
+    pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
+    pCharacteristic->notify();
+}
+
+// -------------------------------------------------------------------------
+// SETUP
+// -------------------------------------------------------------------------
+
 void setup() {
-    Serial.begin(9600);
-    delay(2000);   // allow serial to attach
+    Serial.begin(115200);
+    delay(1000);   // allow serial to attach
+
+    /** Initialize NimBLE and set the device name */
+    NimBLEDevice::init("Player1");
+
+
+    pServer = NimBLEDevice::createServer();
+    pServer->setCallbacks(&serverCallbacks);
+
+    //============================================//
+    // TODO: Configure your Characteristics here  //
+    // Example below        
+    NimBLEService* pBoardService = pServer->createService("2006");                      //
+    pCharacteristic = pBoardService->createCharacteristic("0001", NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::WRITE);
+    pCharacteristic->setCallbacks(&chrCallbacks);
+    // Will require extra steps                   //
+    //============================================//
+    
+
+    /** Start the services when finished creating all Characteristics and Descriptors */
+    pBoardService->start();
+
+    /** Create an advertising instance and add the services to the advertised data */
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    pAdvertising->setName("Mastermind-Player1");  // TODO: Set a unique name here
+    pAdvertising->addServiceUUID(pBoardService->getUUID());
+
+    /**
+      *  If your device is battery powered you may consider setting scan response
+      *  to false as it will extend battery life at the expense of less data sent.
+      */
+    pAdvertising->enableScanResponse(true);
+    pAdvertising->start();
+
+    Serial.printf("Advertising Started\n");
+    
+    // TODO: Set-up CodeMaker and CodeBreaker objects 
+    player.setup();
     dealer.setup();
-    gameRunning = true;
-    dealerStyle = static_cast<uint>(random(0,3));
+    // TODO: Initialize Synchronization Stuff,like Semaphores and Mutexes
+
+    // TODO: Initialize your button with an ISR (you will need to configure an ISR with this RTOS)
+    pinMode(BUTTON_PIN, INPUT);    // external hardware debounce
+
+    // attachInterrupt(BUTTON_PIN, handleButtonPress, RISING);
+    
+    // TODO: Pin Tasks to Cores
+    // Core 1: AI and ML (Higher priority for pruning)
+    xTaskCreatePinnedToCore(
+      mlInferenceTask, 
+      "Task2", 
+      10000, 
+      NULL, 
+      1, 
+      &Task2, 
+      1);
+    delay(500);
+
+    xTaskCreatePinnedToCore(
+      aiGuessTask, 
+      "Task3", 
+      10000, 
+      NULL, 
+      1, 
+      &Task3, 
+      1);
+    delay(500);
+    // Core 0: BLE
+    xTaskCreatePinnedToCore(
+      bleGameplayTask, 
+      "Task1", 
+      10000, 
+      NULL, 
+      1, 
+      &Task1, 
+      0);
+    delay(500);
+
+  pixel.begin();
+  pixel.show();
 }
 
 void loop() {
-  // TODO: Run the AI Model a few times to get an idea of what random code the dealer is using
-  // Remember to use generateBiasedCode(style) instead of generateCode()
-  
-  for (int i = 0; i < 5; i++) {
-    uint8_t code[4];
-
-    dealer.generateBiasedCode(dealerStyle);
-    dealer.getCode(code);    
-    classifyDealerStyle(code);
-  }
-  // TODO: Decide what the model thinks is the best style
-  // Any reasonable approach is fine, I did running average but majority vote is also great
-  int winningStyle = 0;
-  if (classifierConfidence[0] > classifierConfidence[1] && classifierConfidence[0] > classifierConfidence[2]) {
-    winningStyle = 0;
-  } else if (classifierConfidence[1] > classifierConfidence[0] && classifierConfidence[1] > classifierConfidence[2]) {
-    winningStyle = 1;
-  } else {
-    winningStyle = 2;
-  }
-
-  Serial.print("DEALER PROFILED: ");
-  Serial.println(winningStyle == 0 ? "DESCENDING" : 
-                  winningStyle == 1 ? "LOW_NUMBERS" : "TWO_PAIRS");
-  delay(3000); // Delay for readability
-
-  // I accidentally trained the model's outputs to be different from the inputs to the dealer
-  currentDealerStyle = (winningStyle == 0 ? 1 : winningStyle == 1 ? 0 : 2);  // Fixes the ordering, the model outputs are backwards
-  
-  // TODO: Run it again several times using the pre-prune function 
-  // to narrow down the list of possibilities before starting guessing
-  // You should notice a significant increase in efficiency after the initial pre-prune step
-  populateArray(possibilities, ARRAY_SIZE);
-
-// Pre-prune based on ML prediction
-prePrune(currentDealerStyle);
-
-// Get the actual secret ONCE
-uint8_t actual[4];
-dealer.getCode(actual);
-
-turns = 0;
-
-while (true) {
-    int guessIdx = getBestGuess();
-    uint8_t* guess = possibilities[guessIdx];
-
-    uint8_t result[2];
-
-    dealer.compare(result, actual, guess);
-
-    Serial.printf("Guess: %d %d %d %d\n",
-        guess[0], guess[1], guess[2], guess[3]);
-    Serial.printf("Right: %d %d %d %d\n",
-        actual[0], actual[1], actual[2], actual[3]);
-    Serial.printf("Results: %d | %d\n\n",
-        result[0], result[1]);
-
-    // solved
-    if (result[0] == 4) {
-        Serial.printf("I solved it in %d turns! Somethin' light. :)\n", turns);
-        delay(1000);
-        break;
-    }
-
-    // eliminate impossible codes
-    prune(guess, result);
-
-    turns++;
-  }
-  dealerStyle = static_cast<uint>(random(0,3));
-
+    // Empty: Everything is managed by FreeRTOS tasks
+    vTaskDelete(NULL); 
 }
