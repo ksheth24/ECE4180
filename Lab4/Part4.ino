@@ -70,8 +70,7 @@ void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
         counters[k + 1]++;
       }
     }
-  }
-}f    int uniqueCount = 0;
+  }   int uniqueCount = 0;
     int isDescending = code[0] >= code[1] && code[1] >= code[2] && code[2] >= code[3];
     int maxV = 0;
     bool unique = false;
@@ -119,7 +118,6 @@ void IRAM_ATTR handleButtonPress() {
 
 // Task B: AI Guess Making (Triggered by Button)
 void aiGuessTask(void *pvParameters) {
-  populateArray
 
   prePrune(currentDealerStyle);
 
@@ -153,42 +151,6 @@ void aiGuessTask(void *pvParameters) {
 
       turns++;
     }
-}
-
-void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
-  uint8_t counters[VECTOR_SIZE] = {0};
-
-  for (uint32_t i = 0; i < size; i++) {
-    active[i] = true;
-    // Copy current vector
-    memcpy(array[i], counters, VECTOR_SIZE);
-
-    counters[0]++;
-    for (uint8_t k = 0; k < VECTOR_SIZE - 1; k++) {
-      if (counters[k] >= BASE) {
-        counters[k] = 0;
-        counters[k + 1]++;
-      }
-    }
-  }
-}
-
-void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
-  uint8_t counters[VECTOR_SIZE] = {0};
-
-  for (uint32_t i = 0; i < size; i++) {
-    active[i] = true;
-    // Copy current vector
-    memcpy(array[i], counters, VECTOR_SIZE);
-
-    counters[0]++;
-    for (uint8_t k = 0; k < VECTOR_SIZE - 1; k++) {
-      if (counters[k] >= BASE) {
-        counters[k] = 0;
-        counters[k + 1]++;
-      }
-    }
-  }
 }
 
 int getBestGuess() {
