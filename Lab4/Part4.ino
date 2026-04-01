@@ -54,8 +54,78 @@ void aiGuessTask(void *pvParameters) {
 // CORE 0: BLE & WEB TASK
 // Add whatever helper functions you might need
 // -------------------------------------------------------------------------
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
+
+    /**
+         *  We can use the connection handle here to ask for different connection parameters.
+         *  Args: connection handle, min connection interval, max connection interval
+         *  latency, supervision timeout.
+         *  Units; Min/Max Intervals: 1.25 millisecond increments.
+         *  Latency: number of intervals allowed to skip.
+         *  Timeout: 10 millisecond increments.
+         */
+    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+  }
+
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    Serial.printf("Client disconnected - start advertising\n");
+    NimBLEDevice::startAdvertising();
+  }
+
+} serverCallbacks;
+
+/** Handler class for characteristic actions */
+class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onRead(), value: %s\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue().c_str());
+  }
+
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onWrite(), value: %d, %d\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+  }
+
+  /**
+     *  The value returned in code is the NimBLE host return code.
+     */
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
+  }
+
+  /** Peer subscribed to notifications/indications */
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+    std::string str = "Client ID: ";
+    str += connInfo.getConnHandle();
+    str += " Address: ";
+    str += connInfo.getAddress().toString();
+    if (subValue == 0) {
+      str += " Unsubscribed to ";
+    } else if (subValue == 1) {
+      str += " Subscribed to notifications for ";
+    } else if (subValue == 2) {
+      str += " Subscribed to indications for ";
+    } else if (subValue == 3) {
+      str += " Subscribed to notifications and indications for ";
+    }
+    str += std::string(pCharacteristic->getUUID());
+
+    Serial.printf("%s\n", str.c_str());
+  }
+} chrCallbacks;
+
 void bleGameplayTask(void *pvParameters) {
-    
+    Serial.println("Sent.");
+    player.notify();
+    pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
+    pCharacteristic->notify();
+    submitted = false;
 }
 
 // -------------------------------------------------------------------------
