@@ -2,11 +2,12 @@
 #define BUTTON_PIN 7
 
 // --- Include whatever FreeRTOS libraries you might need ---
-#if CONFIG_FREERTOS_UNICORE
-#define TASK_RUNNING_CORE 0
-#else
-#define TASK_RUNNING_CORE 1
-#endif
+
+#include <FreeRTOS.h>
+#include <Task.h>
+TaskHandle_t Task1;
+TaskHandle_t Task2;
+TaskHandle_t Task3;
 
 
 // --- Declare Semaphore and Mutex Stuff ---
@@ -125,7 +126,6 @@ void bleGameplayTask(void *pvParameters) {
     player.notify();
     pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
     pCharacteristic->notify();
-    submitted = false;
 }
 
 // -------------------------------------------------------------------------
@@ -172,19 +172,19 @@ void setup() {
     
     // TODO: Set-up CodeMaker and CodeBreaker objects 
     player.setup();
-    host.setup();
+    dealer.setup();
     // TODO: Initialize Synchronization Stuff,like Semaphores and Mutexes
 
     // TODO: Initialize your button with an ISR (you will need to configure an ISR with this RTOS)
     pinMode(BUTTON_PIN, INPUT);    // external hardware debounce
 
-    attachInterrupt(BUTTON_PIN, buttonISR, RISING);
+    attachInterrupt(BUTTON_PIN, handleButtonPress, RISING);
     
     // TODO: Pin Tasks to Cores
     // Core 1: AI and ML (Higher priority for pruning)
     xTaskCreatePinnedToCore(
       mlInferenceTask, 
-      "ml", 
+      "Task2", 
       10000, 
       NULL, 
       1, 
@@ -194,7 +194,7 @@ void setup() {
 
     xTaskCreatePinnedToCore(
       aiGuessTask, 
-      "ai", 
+      "Task3", 
       10000, 
       NULL, 
       1, 
@@ -204,7 +204,7 @@ void setup() {
     // Core 0: BLE
     xTaskCreatePinnedToCore(
       bleGameplayTask, 
-      "ble", 
+      "Task1", 
       10000, 
       NULL, 
       1, 
