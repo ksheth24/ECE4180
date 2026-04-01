@@ -1,9 +1,6 @@
 #include <Arduino.h>
 
 // --- Include whatever FreeRTOS libraries you might need ---
-#if CONFIG_FREERTOS_UNICORE
-#define TASK_RUNNING_CORE 0
-#endif
 
 
 // --- Declare Semaphore and Mutex Stuff ---
@@ -17,13 +14,24 @@
 CodeMaker dealer;
 CodeBreaker player;
 
-#define BUTTON_PIN 5
-
-
 
 // --- Define BLE stuff ---
-void bleGameplayTask(void *pvParameters);
 
+
+// --- Define AI/ML stuff ---
+
+
+
+// -------------------------------------------------------------------------
+// CORE 1: AI & ML TASKS
+// -------------------------------------------------------------------------
+
+// Task A: Constant ML Inference (Triggered by data)
+void mlInferenceTask(void *pvParameters) {
+    
+}
+
+// Button ISR (Required)
 void IRAM_ATTR handleButtonPress() {
 
 }
@@ -54,9 +62,7 @@ void setup() {
     // TODO: Initialize Synchronization Stuff,like Semaphores and Mutexes
 
     // TODO: Initialize your button with an ISR (you will need to configure an ISR with this RTOS)
-    pinMode(BUTTON_PIN, INPUT);    // external hardware debounce
 
-    attachInterrupt(BUTTON_PIN, handleButtonPress, RISING);
     
     // TODO: Pin Tasks to Cores
     // Core 1: AI and ML (Higher priority for pruning)
