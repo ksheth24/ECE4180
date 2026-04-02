@@ -104,8 +104,11 @@ bool gameRunning;
 float classifierConfidence[3] = {0, 0, 0};
 uint8_t dealerStyle;
 uint8_t currentDealerStyle;
+uint8_t* guess;
 
-Semaphore_Handle btnSem;
+SemaphoreHandle_t btnSem;
+SemaphoreHandle_t aiGuesstoBLE;
+QueueHandle_t myQueue;
 
 void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
   uint8_t counters[VECTOR_SIZE] = {0};
@@ -294,11 +297,15 @@ void IRAM_ATTR handleButtonPress() {
 
 // Task B: AI Guess Making (Triggered by Button)
 void aiGuessTask(void *pvParameters) {
+  populateArray(possibilities, ARRAY_SIZE);
+  prePrune(currentDealerStyle);
     for(;;) {
-      if (xSemaphoreTakeFromISR(btnSem, NULL)) 
-        vTaskDelay(1);
+      if (xSemaphoreTakeFromISR(btnSem, NULL)) {
+        int guessIdx = getBestGuess();
+        guess = possibilities[guessIdx];
+        xSemaphoreGive(aiGuessToBLE, NULL);
+        prune(guess, result);
       }
-      vTaskDelay(1);
     }
 }
 
@@ -347,6 +354,8 @@ void setup() {
 
     // TODO: Initialize Synchronization Stuff,like Semaphores and Mutexes
     btnSem = xSemaphoreCreateBinary();
+    aiGuessToBLE = xSemaphoreCreateBinary();
+    myQueue = xQueueCreate(10, sizeof(int));
 
     // TODO: Initialize your button with an ISR (you will need to configure an ISR with this RTOS)
     pinMode(BUTTON_PIN, INPUT);
