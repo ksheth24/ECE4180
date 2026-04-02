@@ -60,6 +60,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
                   pCharacteristic->getUUID().toString().c_str(),
                   pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    xQueueSend(myQueue, getValue(), portMAX_DELAY);
   }
 
   void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
@@ -285,9 +286,26 @@ TaskHandle_t taskBLEHandle;
 
 // Task A: Constant ML Inference (Triggered by data)
 void mlInferenceTask(void *pvParameters) {
+  classifierConfidence[0] = 0;
+  classifierConfidence[1] = 0;
+  classifierConfidence[2] = 0;
+  for (int i = 0; i < 10; i++) {
+    uint8_t code[4];
+
+    dealer.generateBiasedCode(static_cast<uint>(random(0,3)));
+    dealer.getCode(code);    
+    classifyDealerStyle(code);
+  }
+  // TODO
     for(;;) {
-      vTaskDelay(100);
+    uint8_t results[2];
+
+    if (xQueueReceive(myQueue, results, portMAX_DELAY)) {
+      if (results[0] == 4) {
+        classifyDealerStyle(guess);
+      }
     }
+  }
 }
 
 // Button ISR (Required)
@@ -316,8 +334,8 @@ void bleGameplayTask(void *pvParameters) {
   for(;;) {
     if(xSemaphoreTake(aiGuessToBLE, portMAX_DELAY)) {
       player.notify();
-      pSrvChr->setValue((const uint8_t*)guess, sizeof(int));
-      pSrvChr->notify();
+      pSrvChar->setValue((const uint8_t*)guess, sizeof(int));
+      pSrvChar->notify();
     }
   }
 }
