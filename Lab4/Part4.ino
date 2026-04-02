@@ -300,7 +300,7 @@ void aiGuessTask(void *pvParameters) {
   populateArray(possibilities, ARRAY_SIZE);
   prePrune(currentDealerStyle);
     for(;;) {
-      if (xSemaphoreTake(btnSem)) {
+      if (xSemaphoreTake(btnSem, portMAX_DELAY)) {
         int guessIdx = getBestGuess();
         guess = possibilities[guessIdx];
         xSemaphoreGive(aiGuessToBLE);
@@ -315,7 +315,9 @@ void aiGuessTask(void *pvParameters) {
 void bleGameplayTask(void *pvParameters) {
   for(;;) {
     if(xSemaphoreTake(aiGuessToBLE, portMAX_DELAY)) {
-      vTaskDelay(100);
+      player.notify();
+      pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
+      pCharacteristic->notify();
     }
   }
 }
@@ -364,11 +366,11 @@ void setup() {
     
     // TODO: Pin Tasks to Cores
     // Core 1: AI and ML (Higher priority for pruning)
-    xTaskCreatePinnedToCore(mlInferenceTask, "ML Inference", 2048, NULL, 1, &taskMLHandle, 1);
-    xTaskCreatePinnedToCore(aiGuessTask, "AI Guess", 2048, NULL, 1, &taskAIHandle, 1);
+    xTaskCreatePinnedToCore(mlInferenceTask, "ML Inference", 4096, NULL, 1, &taskMLHandle, 1);
+    xTaskCreatePinnedToCore(aiGuessTask, "AI Guess", 4096, NULL, 1, &taskAIHandle, 1);
 
     // Core 0: BLE
-    xTaskCreatePinnedToCore(bleGameplayTask, "BLE Send Guess", 2048, NULL, 1, &taskBLEHandle, 0);
+    xTaskCreatePinnedToCore(bleGameplayTask, "BLE Send Guess", 4096, NULL, 1, &taskBLEHandle, 0);
 }
 
 void loop() {
