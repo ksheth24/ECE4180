@@ -316,8 +316,8 @@ void bleGameplayTask(void *pvParameters) {
   for(;;) {
     if(xSemaphoreTake(aiGuessToBLE, portMAX_DELAY)) {
       player.notify();
-      pCharacteristic->setValue((const uint8_t*)player.move.playerGuess, sizeof(player.move.playerGuess));
-      pCharacteristic->notify();
+      pSrvChr->setValue((const uint8_t*)guess, sizeof(int));
+      pSrvChr->notify();
     }
   }
 }
