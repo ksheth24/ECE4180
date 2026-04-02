@@ -23,71 +23,6 @@ CodeBreaker player;
 
 Adafruit_NeoPixel pixel(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800); 
 
-// --- Bluetooth Stuff ---
-
-#include <NimBLEDevice.h>
-
-#define DEVICE_NAME  "Player1"
-#define SERVICE_UUID "2006"
-#define CHAR_UUID    "0001"
-
-NimBLEServer*         pServer  = nullptr;
-NimBLECharacteristic* pSrvChar = nullptr;
-
-class ServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
-
-    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
-  }
-
-  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-    Serial.printf("Client disconnected - start advertising\n");
-    NimBLEDevice::startAdvertising();
-  }
-
-} serverCallbacks;
-
-/** Handler class for characteristic actions */
-class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-    Serial.printf("%s : onRead(), value: %s\n",
-                  pCharacteristic->getUUID().toString().c_str(),
-                  pCharacteristic->getValue().c_str());
-  }
-
-  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
-    Serial.printf("%s : onWrite(), value: %d, %d\n",
-                  pCharacteristic->getUUID().toString().c_str(),
-                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
-    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
-    xQueueSend(myQueue, pCharacteristic->getValue(), portMAX_DELAY);
-  }
-
-  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
-    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
-  }
-
-  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
-    std::string str = "Client ID: ";
-    str += connInfo.getConnHandle();
-    str += " Address: ";
-    str += connInfo.getAddress().toString();
-    if (subValue == 0) {
-      str += " Unsubscribed to ";
-    } else if (subValue == 1) {
-      str += " Subscribed to notifications for ";
-    } else if (subValue == 2) {
-      str += " Subscribed to indications for ";
-    } else if (subValue == 3) {
-      str += " Subscribed to notifications and indications for ";
-    }
-    str += std::string(pCharacteristic->getUUID());
-
-    Serial.printf("%s\n", str.c_str());
-  }
-} chrCallbacks;
-
 
 // --- Define AI/ML stuff ---
 
@@ -276,6 +211,72 @@ void prePrune(uint8_t predictedStyle) {
 
 }
 
+// --- Bluetooth Stuff ---
+
+#include <NimBLEDevice.h>
+
+#define DEVICE_NAME  "Player1"
+#define SERVICE_UUID "2006"
+#define CHAR_UUID    "0001"
+
+NimBLEServer*         pServer  = nullptr;
+NimBLECharacteristic* pSrvChar = nullptr;
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
+
+    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+  }
+
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    Serial.printf("Client disconnected - start advertising\n");
+    NimBLEDevice::startAdvertising();
+  }
+
+} serverCallbacks;
+
+/** Handler class for characteristic actions */
+class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onRead(), value: %s\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue().c_str());
+  }
+
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+    Serial.printf("%s : onWrite(), value: %d, %d\n",
+                  pCharacteristic->getUUID().toString().c_str(),
+                  pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
+    xQueueSend(myQueue, pCharacteristic->getValue(), portMAX_DELAY);
+    prune(guess, pCharacteristic->getValue());
+  }
+
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
+  }
+
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+    std::string str = "Client ID: ";
+    str += connInfo.getConnHandle();
+    str += " Address: ";
+    str += connInfo.getAddress().toString();
+    if (subValue == 0) {
+      str += " Unsubscribed to ";
+    } else if (subValue == 1) {
+      str += " Subscribed to notifications for ";
+    } else if (subValue == 2) {
+      str += " Subscribed to indications for ";
+    } else if (subValue == 3) {
+      str += " Subscribed to notifications and indications for ";
+    }
+    str += std::string(pCharacteristic->getUUID());
+
+    Serial.printf("%s\n", str.c_str());
+  }
+} chrCallbacks;
+
 // -------------------------------------------------------------------------
 // CORE 1: AI & ML TASKS
 // -------------------------------------------------------------------------
@@ -303,6 +304,7 @@ void mlInferenceTask(void *pvParameters) {
     if (xQueueReceive(myQueue, results, portMAX_DELAY)) {
       if (results[0] == 4) {
         classifyDealerStyle(guess);
+        
       }
     }
   }
