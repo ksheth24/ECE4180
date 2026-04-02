@@ -107,7 +107,7 @@ uint8_t currentDealerStyle;
 uint8_t* guess;
 
 SemaphoreHandle_t btnSem;
-SemaphoreHandle_t aiGuesstoBLE;
+SemaphoreHandle_t aiGuessToBLE;
 QueueHandle_t myQueue;
 
 void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
@@ -300,11 +300,10 @@ void aiGuessTask(void *pvParameters) {
   populateArray(possibilities, ARRAY_SIZE);
   prePrune(currentDealerStyle);
     for(;;) {
-      if (xSemaphoreTakeFromISR(btnSem, NULL)) {
+      if (xSemaphoreTake(btnSem)) {
         int guessIdx = getBestGuess();
         guess = possibilities[guessIdx];
-        xSemaphoreGive(aiGuessToBLE, NULL);
-        prune(guess, result);
+        xSemaphoreGive(aiGuessToBLE);
       }
     }
 }
@@ -315,7 +314,9 @@ void aiGuessTask(void *pvParameters) {
 // -------------------------------------------------------------------------
 void bleGameplayTask(void *pvParameters) {
   for(;;) {
-    vTaskDelay(100);
+    if(xSemaphoreTake(aiGuessToBLE, portMAX_DELAY)) {
+      vTaskDelay(100);
+    }
   }
 }
 
@@ -359,7 +360,7 @@ void setup() {
 
     // TODO: Initialize your button with an ISR (you will need to configure an ISR with this RTOS)
     pinMode(BUTTON_PIN, INPUT);
-    attachInterrupt(BUTTON_PIN, handleButtonPress, FALLING);
+    attachInterrupt(BUTTON_PIN, handleButtonPress, RISING);
     
     // TODO: Pin Tasks to Cores
     // Core 1: AI and ML (Higher priority for pruning)
