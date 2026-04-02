@@ -224,14 +224,14 @@ void setup() {
     dealer.setup();
     gameRunning = true;
     dealerStyle = static_cast<uint>(random(0,3));
-    // Enabling XTAL clk
-    *PCR_TIMERGROUP0_WDT_CLK_CONF_REG |= (1 << 22);
+  
 
     // Setting prescaler value of 10000 (40 MHz XTAL clk to 4 KHz tick)
     *TIMG_T0CONFIG_REG = 0;
     *TIMG_T0CONFIG_REG |= (0x2710 << 13); // Set prescaler value
     *TIMG_T0CONFIG_REG |= (1 << 30);      // Configure increase
     *TIMG_T0CONFIG_REG |= (1 << 12);      // Reset clock counter divider
+    *TIMG_T0CONFIG_REG |= (1 << 9);
 
     // Setting timer value to 0
     *TIMG_T0LOADLO_REG = 0;
