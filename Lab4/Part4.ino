@@ -250,8 +250,8 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
                   pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     xQueueSend(myQueue, pCharacteristic->getValue(), portMAX_DELAY);
-    prune(guess, pCharacteristic->getValue());
-  }
+prune(guess, (uint8_t*) pCharacteristic->getValue().data());  
+}
 
   void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
     Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
