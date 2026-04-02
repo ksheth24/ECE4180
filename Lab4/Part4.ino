@@ -1,4 +1,5 @@
 #include <Arduino.h>
+QueueHandle_t myQueue;
 
 
 // --- Declare Semaphore and Mutex Stuff ---
@@ -60,7 +61,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
                   pCharacteristic->getUUID().toString().c_str(),
                   pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
-    xQueueSend(myQueue, getValue(), portMAX_DELAY);
+    xQueueSend(myQueue, pCharacteristic->getValue(), portMAX_DELAY);
   }
 
   void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
@@ -109,7 +110,6 @@ uint8_t* guess;
 
 SemaphoreHandle_t btnSem;
 SemaphoreHandle_t aiGuessToBLE;
-QueueHandle_t myQueue;
 
 void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
   uint8_t counters[VECTOR_SIZE] = {0};
