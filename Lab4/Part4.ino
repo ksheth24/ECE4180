@@ -1,9 +1,10 @@
 #include <Arduino.h>
-QueueHandle_t myQueue;
-
 
 // --- Declare Semaphore and Mutex Stuff ---
-
+QueueHandle_t myQueue;
+SemaphoreHandle_t btnSem;
+SemaphoreHandle_t aiGuessToBLE;
+bool press;
 
 // --- Define MasterMind stuff ---
 #define CODEMAKER
@@ -43,9 +44,6 @@ uint8_t dealerStyle;
 uint8_t currentDealerStyle;
 uint8_t* guess;
 
-SemaphoreHandle_t btnSem;
-SemaphoreHandle_t aiGuessToBLE;
-
 void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
   uint8_t counters[VECTOR_SIZE] = {0};
 
@@ -62,7 +60,7 @@ void populateArray(uint8_t (*array)[VECTOR_SIZE], uint32_t size) {
   }
 }
 
-void prune(uint8_t* lastGuess, uint8_t* results) {
+void prune(uint8_t* lastGuess, const uint8_t* results) {
     for (int i = 0; i < ARRAY_SIZE; i++) {
         if (!active[i]) continue; // Already pruned
 
@@ -181,15 +179,15 @@ void prePrune(uint8_t predictedStyle) {
       }
       uint8_t* code = possibilities[i];
       int uniqueCount = 0;
-      int isDescending = code[0] >= code[1] && code[1] >= code[2] && code[2] >= code[3];
-      int maxV = 0;
+      uint8_t isDescending = code[0] >= code[1] && code[1] >= code[2] && code[2] >= code[3];
+      uint8_t maxV = 0;
       bool unique = false;
-      for (int k = 0; k < 4; k++) {
+      for (uint8_t k = 0; k < 4; k++) {
         unique = true;
         if (code[k] > maxV) {
           maxV = code[k];
         }
-        for (int j = k - 1; j >= 0; j--) {
+        for (uint8_t j = k - 1; j >= 0; j--) {
           if (code[j] == code[k]) {
             unique = false;
           }
@@ -250,8 +248,9 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
                   pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     Serial.printf("Feedback recieved! Black: %d, White: %d\n", pCharacteristic->getValue()[0], pCharacteristic->getValue()[1]);
     xQueueSend(myQueue, pCharacteristic->getValue(), portMAX_DELAY);
-prune(guess, (uint8_t*) pCharacteristic->getValue().data());  
-}
+    prune(guess, pCharacteristic->getValue());
+    xSemaphoreGive(aiGuessToBLE);
+  }
 
   void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
     Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
@@ -312,7 +311,10 @@ void mlInferenceTask(void *pvParameters) {
 
 // Button ISR (Required)
 void IRAM_ATTR handleButtonPress() {
-  xSemaphoreGiveFromISR(btnSem, NULL);
+  xSemaphoreTakeFromISR(btnSem, NULL);
+  press = true;
+  xSemaphoreGiveFromISR(btnSem, NULL);  
+  delay(100);
 }
 
 // Task B: AI Guess Making (Triggered by Button)
@@ -320,10 +322,14 @@ void aiGuessTask(void *pvParameters) {
   populateArray(possibilities, ARRAY_SIZE);
   prePrune(currentDealerStyle);
     for(;;) {
-      if (xSemaphoreTake(btnSem, portMAX_DELAY)) {
+      if (press == 1) {
+        xSemaphoreTake(btnSem, portMAX_DELAY);
+        xSemaphoreTake(aiGuessToBLE, portMAX_DELAY);
         int guessIdx = getBestGuess();
         guess = possibilities[guessIdx];
+        press = false;
         xSemaphoreGive(aiGuessToBLE);
+        xSemaphoreGive(btnSem);
       }
     }
 }
@@ -386,11 +392,11 @@ void setup() {
     
     // TODO: Pin Tasks to Cores
     // Core 1: AI and ML (Higher priority for pruning)
-    xTaskCreatePinnedToCore(mlInferenceTask, "ML Inference", 4096, NULL, 1, &taskMLHandle, 1);
-    xTaskCreatePinnedToCore(aiGuessTask, "AI Guess", 4096, NULL, 1, &taskAIHandle, 1);
+    xTaskCreatePinnedToCore(mlInferenceTask, "ML Inference", 16384, NULL, 1, &taskMLHandle, 1);
+    xTaskCreatePinnedToCore(aiGuessTask, "AI Guess", 16384, NULL, 1, &taskAIHandle, 1);
 
     // Core 0: BLE
-    xTaskCreatePinnedToCore(bleGameplayTask, "BLE Send Guess", 4096, NULL, 1, &taskBLEHandle, 0);
+    xTaskCreatePinnedToCore(bleGameplayTask, "BLE Send Guess", 16384, NULL, 1, &taskBLEHandle, 0);
 }
 
 void loop() {
