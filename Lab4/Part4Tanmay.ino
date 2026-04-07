@@ -17,13 +17,13 @@
 // ==============================
 // BLE / Game constants
 // ==============================
-#define DEVICE_NAME  "Shajpaul-S3-Server"
-#define SERVICE_UUID "0420"
+#define DEVICE_NAME  "Server"
+#define SERVICE_UUID "2006"
 #define CHAR_UUID    "0001"
 
 #define LED_PIN     18
 #define NUM_LEDS    1
-#define AI_BUTTON   8
+#define AI_BUTTON   7
 
 // ==============================
 // BLE globals
