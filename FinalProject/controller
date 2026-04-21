@@ -1,0 +1,38 @@
+#define BUTTON 11
+#include <Wire.h>
+#include <ICM_20948.h>
+#include <Adafruit_NeoPixel.h>
+
+
+ICM_20948_I2C myICM;
+
+bool pressed = false;
+
+// Adafruit_NeoPixel pixel(1, 8, NEO_GRB + NEO_KHZ800);
+
+
+int count = 0;
+  void setup() {
+    // put your setup code here, to run once:
+    Serial.begin(115200);
+    pinMode(BUTTON, INPUT_PULLUP);
+    Wire.begin(23, 22);
+    Wire.setClock(400000);
+    myICM.begin(Wire, 1);
+  }
+
+
+  void loop() {
+      if (digitalRead(BUTTON) == 0) {
+        pressed = !pressed;
+        delay(500);
+      }
+      if (myICM.dataReady()) {
+        myICM.getAGMT();
+        if (myICM.accX() > 400 && pressed) {
+          Serial.println("L");
+        } else if (myICM.accX() < -400 && pressed) {
+          Serial.println("R");
+        } 
+      }
+  }
