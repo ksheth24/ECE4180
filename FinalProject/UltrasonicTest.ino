@@ -2,11 +2,11 @@
 
 #define TRIG 8
 #define ECHO 7
-NEW SKETCH
 
 #define SERVO_PIN 21
 #define BUZZER 5
 
+#define IR 37
 Servo myServo;
 
 volatile bool detected = false;
@@ -45,6 +45,11 @@ void sensorTask(void *pvParameters) {
       ledcWrite(BUZZER, 128);
       vTaskDelay(pdMS_TO_TICKS(100));
       ledcWrite(BUZZER, 0);
+      digitalWrite(IR, HIGH);
+      delay(1000);
+    } else {
+      digitalWrite(IR, LOW);
+      delay(1000);
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -68,6 +73,7 @@ void setup() {
 
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
+  pinMode(IR, OUTPUT);
 
   ledcAttachChannel(BUZZER, 2000, 12, 2);
 
