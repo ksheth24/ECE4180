@@ -1,14 +1,55 @@
 #include <ESP32Servo.h>
 
-#define TRIG 23
-#define ECHO 22
-#define SERVO_PIN 18
-#define BUZZER 20
+#define TRIG 8
+#define ECHO 7
+NEW SKETCH
+
+#define SERVO_PIN 21
+#define BUZZER 5
 
 Servo myServo;
 
-bool locked = false;
-bool goLeft = true;
+volatile bool detected = false;
+
+void servoTask(void *pvParameters) {
+  myServo.attach(SERVO_PIN);
+  myServo.write(0);
+
+  int servoAngle = 0;
+  bool goLeft = true;
+
+  for (;;) {
+    if (goLeft) {
+      servoAngle++;
+      if (servoAngle >= 180) goLeft = false;
+    } else {
+      servoAngle--;
+      if (servoAngle <= 0) goLeft = true;
+    }
+
+    myServo.write(servoAngle);
+    vTaskDelay(pdMS_TO_TICKS(15));
+  }
+}
+
+void sensorTask(void *pvParameters) {
+  for (;;) {
+    long distance = getDistance();
+
+    Serial.print("Distance: ");
+    Serial.println(distance);
+
+    detected = (distance != -1 && distance <= 8);
+
+    if (detected) {
+      ledcWrite(BUZZER, 128);
+      vTaskDelay(pdMS_TO_TICKS(100));
+      ledcWrite(BUZZER, 0);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
 
 long getDistance() {
   digitalWrite(TRIG, LOW);
@@ -18,49 +59,22 @@ long getDistance() {
   digitalWrite(TRIG, LOW);
 
   long duration = pulseIn(ECHO, HIGH, 30000);
-
   if (duration == 0) return -1;
   return duration / 58;
 }
 
 void setup() {
+  Serial.begin(115200);
+
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
 
-  myServo.attach(SERVO_PIN);
-  myServo.write(90);
-
   ledcAttachChannel(BUZZER, 2000, 12, 2);
 
-  Serial.begin(115200);
+  xTaskCreatePinnedToCore(servoTask,  "ServoTask",  2048, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(sensorTask, "SensorTask", 2048, NULL, 1, NULL, 1);
 }
 
 void loop() {
-  long distance = getDistance();
-
-  Serial.print("Distance: ");
-  Serial.println(distance);
-
-  bool detected = (distance != -1 && distance <= 10);
-
-  if (detected && !locked) {
-    locked = true;
-    if (goLeft) {
-      ledcWrite(BUZZER, 512);
-      myServo.write(0);
-      delay(100);
-      ledcWrite(BUZZER, 0);
-    } else {
-      ledcWrite(BUZZER, 512);
-      myServo.write(180);
-      delay(100);
-      ledcWrite(BUZZER, 0);
-    }
-
-    goLeft = !goLeft; // toggle for next time
-  } else if (!detected) {
-    locked = false;
-  }
-
-  delay(50);
+  vTaskDelete(NULL);
 }
