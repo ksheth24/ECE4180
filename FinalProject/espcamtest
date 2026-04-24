@@ -1,16 +1,20 @@
 #include "esp_camera.h"
 #include "board_config.h"
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
+#include <shapes_inferencing.h>
+#include "edge-impulse-sdk/dsp/image/image.hpp"
 
 // ===================
 // Configure these
 // ===================
-const char* SSID       = "Sheth";
-const char* PASSWORD   = "123456789";
-const char* SERVER_URL = "https://ece4180cv.onrender.com/process_image";
-const int   INTERVAL_MS = 5000;  // Capture every 5 seconds
+const int INTERVAL_MS = 5000;
+
+/* Private variables */
+static bool debug_nn = false;
+uint8_t *snapshot_buf;
+
+#define EI_CAMERA_RAW_FRAME_BUFFER_COLS  320
+#define EI_CAMERA_RAW_FRAME_BUFFER_ROWS  240
+#define EI_CAMERA_FRAME_BYTE_SIZE        3
 
 void initCamera() {
   camera_config_t config;
@@ -34,74 +38,149 @@ void initCamera() {
   config.pin_reset    = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_QVGA;   // 320x240
+  config.frame_size   = FRAMESIZE_QVGA;
   config.jpeg_quality = 12;
   config.fb_count     = 1;
+  config.fb_location  = CAMERA_FB_IN_PSRAM;
+  config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed: 0x%x\n", err);
     while (true) delay(1000);
   }
+
+  // Match sensor adjustments from the example
+  sensor_t *s = esp_camera_sensor_get();
+  s->set_vflip(s, 1);
+  s->set_hmirror(s, 1);
+  s->set_awb_gain(s, 1);
+
   Serial.println("Camera initialised");
 }
 
-void captureAndPost() {
-  camera_fb_t* fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Frame capture failed");
+// Required callback for Edge Impulse signal
+static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
+  size_t pixel_ix  = offset * 3;
+  size_t pixels_left = length;
+  size_t out_ptr_ix  = 0;
+
+  while (pixels_left != 0) {
+    // Swap BGR to RGB
+    out_ptr[out_ptr_ix] = (snapshot_buf[pixel_ix + 2] << 16)
+                        + (snapshot_buf[pixel_ix + 1] << 8)
+                        +  snapshot_buf[pixel_ix];
+    out_ptr_ix++;
+    pixel_ix += 3;
+    pixels_left--;
+  }
+  return 0;
+}
+
+void captureAndClassify() {
+  // Allocate snapshot buffer
+  snapshot_buf = (uint8_t*)malloc(
+    EI_CAMERA_RAW_FRAME_BUFFER_COLS *
+    EI_CAMERA_RAW_FRAME_BUFFER_ROWS *
+    EI_CAMERA_FRAME_BYTE_SIZE
+  );
+  if (!snapshot_buf) {
+    Serial.println("ERR: Failed to allocate snapshot buffer");
     return;
   }
 
-  Serial.printf("Captured %u bytes — POSTing to server...\n", fb->len);
-
-  WiFiClientSecure client;
-  client.setInsecure();       // skip SSL cert verification
-  client.setTimeout(15);
-
-  HTTPClient http;
-  http.begin(client, SERVER_URL);
-  http.addHeader("Content-Type", "application/octet-stream");
-  http.setTimeout(15000);
-
-  int httpCode = http.POST(fb->buf, fb->len);
-  esp_camera_fb_return(fb);   // return buffer ASAP
-
-  if (httpCode == 200) {
-    String body = http.getString();
-    Serial.println("Response: " + body);
-    if (body.indexOf("\"is_majority_blue\": true") >= 0 ||
-        body.indexOf("\"is_majority_blue\":true") >= 0) {
-      Serial.println("Result: MAJORITY BLUE");
-    } else {
-      Serial.println("Result: NOT majority blue");
-    }
-  } else {
-    Serial.printf("HTTP error: %d\n", httpCode);
+  // Grab JPEG frame from camera
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Frame capture failed");
+    free(snapshot_buf);
+    return;
   }
 
-  http.end();
+  // Decode JPEG -> RGB888 into snapshot_buf
+  bool converted = fmt2rgb888(fb->buf, fb->len, PIXFORMAT_JPEG, snapshot_buf);
+  esp_camera_fb_return(fb);
+
+  if (!converted) {
+    Serial.println("ERR: JPEG to RGB888 conversion failed");
+    free(snapshot_buf);
+    return;
+  }
+
+  // Resize/crop to whatever resolution the model expects
+  if (EI_CLASSIFIER_INPUT_WIDTH  != EI_CAMERA_RAW_FRAME_BUFFER_COLS ||
+      EI_CLASSIFIER_INPUT_HEIGHT != EI_CAMERA_RAW_FRAME_BUFFER_ROWS) {
+    ei::image::processing::crop_and_interpolate_rgb888(
+      snapshot_buf,
+      EI_CAMERA_RAW_FRAME_BUFFER_COLS,
+      EI_CAMERA_RAW_FRAME_BUFFER_ROWS,
+      snapshot_buf,
+      EI_CLASSIFIER_INPUT_WIDTH,
+      EI_CLASSIFIER_INPUT_HEIGHT
+    );
+  }
+
+  // Build the signal and run the classifier
+  ei::signal_t signal;
+  signal.total_length = EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT;
+  signal.get_data     = &ei_camera_get_data;
+
+  ei_impulse_result_t result = { 0 };
+  EI_IMPULSE_ERROR err = run_classifier(&signal, &result, debug_nn);
+
+  if (err != EI_IMPULSE_OK) {
+    Serial.printf("ERR: Classifier failed (%d)\n", err);
+    free(snapshot_buf);
+    return;
+  }
+
+  // Print timing
+  Serial.printf("Predictions (DSP: %d ms, Classification: %d ms, Anomaly: %d ms):\n",
+    result.timing.dsp,
+    result.timing.classification,
+    result.timing.anomaly
+  );
+
+  // Print all class scores
+#if EI_CLASSIFIER_OBJECT_DETECTION == 1
+  Serial.println("Bounding boxes:");
+  for (uint32_t i = 0; i < result.bounding_boxes_count; i++) {
+    ei_impulse_result_bounding_box_t bb = result.bounding_boxes[i];
+    if (bb.value == 0) continue;
+    Serial.printf("  %s (%.4f) [x:%u y:%u w:%u h:%u]\n",
+      bb.label, bb.value, bb.x, bb.y, bb.width, bb.height);
+  }
+#else
+  Serial.println("Classification scores:");
+  for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+    Serial.printf("  %-20s %.5f\n",
+      ei_classifier_inferencing_categories[i],
+      result.classification[i].value
+    );
+  }
+#endif
+
+#if EI_CLASSIFIER_HAS_ANOMALY
+  Serial.printf("Anomaly score: %.3f\n", result.anomaly);
+#endif
+
+  free(snapshot_buf);
 }
 
 void setup() {
   Serial.begin(115200);
+  while (!Serial);
+  Serial.println("Edge Impulse Local Inference Demo");
   initCamera();
-
-  WiFi.begin(SSID, PASSWORD);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
+  Serial.println("Starting inference in 2 seconds...");
+  delay(2000);
 }
 
 void loop() {
-  if (WiFi.status() == WL_CONNECTED) {
-    captureAndPost();
-  } else {
-    Serial.println("WiFi disconnected — reconnecting...");
-    WiFi.reconnect();
-  }
+  captureAndClassify();
   delay(INTERVAL_MS);
 }
+
+#if !defined(EI_CLASSIFIER_SENSOR) || EI_CLASSIFIER_SENSOR != EI_CLASSIFIER_SENSOR_CAMERA
+#error "Invalid model for current sensor"
+#endif
