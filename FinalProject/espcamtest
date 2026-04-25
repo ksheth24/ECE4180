@@ -3,11 +3,6 @@
 #include <shapes_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
 
-// ===================
-// Configure these
-// ===================
-const int INTERVAL_MS = 5000;
-
 /* Private variables */
 static bool debug_nn = false;
 uint8_t *snapshot_buf;
@@ -50,7 +45,6 @@ void initCamera() {
     while (true) delay(1000);
   }
 
-  // Match sensor adjustments from the example
   sensor_t *s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
   s->set_hmirror(s, 1);
@@ -59,14 +53,12 @@ void initCamera() {
   Serial.println("Camera initialised");
 }
 
-// Required callback for Edge Impulse signal
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
-  size_t pixel_ix  = offset * 3;
+  size_t pixel_ix    = offset * 3;
   size_t pixels_left = length;
   size_t out_ptr_ix  = 0;
 
   while (pixels_left != 0) {
-    // Swap BGR to RGB
     out_ptr[out_ptr_ix] = (snapshot_buf[pixel_ix + 2] << 16)
                         + (snapshot_buf[pixel_ix + 1] << 8)
                         +  snapshot_buf[pixel_ix];
@@ -77,8 +69,8 @@ static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
   return 0;
 }
 
-void captureAndClassify() {
-  // Allocate snapshot buffer
+// Returns the winning label as a String, or "error" on failure
+String captureAndClassify() {
   snapshot_buf = (uint8_t*)malloc(
     EI_CAMERA_RAW_FRAME_BUFFER_COLS *
     EI_CAMERA_RAW_FRAME_BUFFER_ROWS *
@@ -86,28 +78,25 @@ void captureAndClassify() {
   );
   if (!snapshot_buf) {
     Serial.println("ERR: Failed to allocate snapshot buffer");
-    return;
+    return "error";
   }
 
-  // Grab JPEG frame from camera
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("Frame capture failed");
+    Serial.println("ERR: Frame capture failed");
     free(snapshot_buf);
-    return;
+    return "error";
   }
 
-  // Decode JPEG -> RGB888 into snapshot_buf
   bool converted = fmt2rgb888(fb->buf, fb->len, PIXFORMAT_JPEG, snapshot_buf);
   esp_camera_fb_return(fb);
 
   if (!converted) {
     Serial.println("ERR: JPEG to RGB888 conversion failed");
     free(snapshot_buf);
-    return;
+    return "error";
   }
 
-  // Resize/crop to whatever resolution the model expects
   if (EI_CLASSIFIER_INPUT_WIDTH  != EI_CAMERA_RAW_FRAME_BUFFER_COLS ||
       EI_CLASSIFIER_INPUT_HEIGHT != EI_CAMERA_RAW_FRAME_BUFFER_ROWS) {
     ei::image::processing::crop_and_interpolate_rgb888(
@@ -120,7 +109,6 @@ void captureAndClassify() {
     );
   }
 
-  // Build the signal and run the classifier
   ei::signal_t signal;
   signal.total_length = EI_CLASSIFIER_INPUT_WIDTH * EI_CLASSIFIER_INPUT_HEIGHT;
   signal.get_data     = &ei_camera_get_data;
@@ -131,54 +119,53 @@ void captureAndClassify() {
   if (err != EI_IMPULSE_OK) {
     Serial.printf("ERR: Classifier failed (%d)\n", err);
     free(snapshot_buf);
-    return;
+    return "error";
   }
 
-  // Print timing
-  Serial.printf("Predictions (DSP: %d ms, Classification: %d ms, Anomaly: %d ms):\n",
-    result.timing.dsp,
-    result.timing.classification,
-    result.timing.anomaly
-  );
+  // Find the label with the highest confidence score
+  String bestLabel = "unknown";
+  float  bestScore = -1.0f;
 
-  // Print all class scores
 #if EI_CLASSIFIER_OBJECT_DETECTION == 1
-  Serial.println("Bounding boxes:");
   for (uint32_t i = 0; i < result.bounding_boxes_count; i++) {
     ei_impulse_result_bounding_box_t bb = result.bounding_boxes[i];
-    if (bb.value == 0) continue;
-    Serial.printf("  %s (%.4f) [x:%u y:%u w:%u h:%u]\n",
-      bb.label, bb.value, bb.x, bb.y, bb.width, bb.height);
+    if (bb.value > bestScore) {
+      bestScore = bb.value;
+      bestLabel = String(bb.label);
+    }
   }
 #else
-  Serial.println("Classification scores:");
   for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
-    Serial.printf("  %-20s %.5f\n",
-      ei_classifier_inferencing_categories[i],
-      result.classification[i].value
-    );
+    if (result.classification[i].value > bestScore) {
+      bestScore = result.classification[i].value;
+      bestLabel = String(ei_classifier_inferencing_categories[i]);
+    }
   }
-#endif
-
-#if EI_CLASSIFIER_HAS_ANOMALY
-  Serial.printf("Anomaly score: %.3f\n", result.anomaly);
 #endif
 
   free(snapshot_buf);
+  return bestLabel;
 }
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
-  Serial.println("Edge Impulse Local Inference Demo");
+  Serial.println("Ready. Send 'active' to trigger inference.");
   initCamera();
-  Serial.println("Starting inference in 2 seconds...");
-  delay(2000);
 }
 
 void loop() {
-  captureAndClassify();
-  delay(INTERVAL_MS);
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.equalsIgnoreCase("active")) {
+      Serial.println("Triggered — capturing image...");
+      String result = captureAndClassify();
+      // Send back just the label so the other board can parse it easily
+      Serial.println(result);
+    }
+  }
 }
 
 #if !defined(EI_CLASSIFIER_SENSOR) || EI_CLASSIFIER_SENSOR != EI_CLASSIFIER_SENSOR_CAMERA
