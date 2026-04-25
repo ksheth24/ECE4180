@@ -5,6 +5,8 @@
 
 #define SERVO_PIN 21
 #define BUZZER 5
+#define TX 43
+#define RX 44
 
 #define IR 37
 Servo myServo;
@@ -42,18 +44,45 @@ void sensorTask(void *pvParameters) {
     detected = (distance != -1 && distance <= 8);
 
     if (detected) {
-      ledcWrite(BUZZER, 128);
-      vTaskDelay(pdMS_TO_TICKS(100));
-      ledcWrite(BUZZER, 0);
-      digitalWrite(IR, HIGH);
-      delay(1000);
-    } else {
-      digitalWrite(IR, LOW);
-      delay(1000);
+      // Send "active" and wait for response
+      Serial1.println("active");
+      Serial.println("Sent: active");
+
+      String response = waitForResponse(2000); // 2 second timeout
+      Serial.print("Received: ");
+      Serial.println(response);
+
+      if (response == "circle") {
+        // Trigger buzzer and laser only for circle
+        ledcWrite(BUZZER, 128);
+        digitalWrite(IR, HIGH);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ledcWrite(BUZZER, 0);
+        digitalWrite(IR, LOW);
+      }
+      // If "triangle" or anything else, do nothing
+
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
   }
+}
+
+// Waits up to timeoutMs for a response on Serial1
+String waitForResponse(unsigned long timeoutMs) {
+  String result = "";
+  unsigned long start = millis();
+
+  while (millis() - start < timeoutMs) {
+    if (Serial1.available()) {
+      result = Serial1.readStringUntil('\n');
+      result.trim(); // Remove \r\n whitespace
+      if (result.length() > 0) return result;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+
+  return ""; // Timeout, empty response
 }
 
 long getDistance() {
@@ -70,6 +99,7 @@ long getDistance() {
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(115200, SERIAL_8N1, RX, TX); // RX=44, TX=43
 
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
