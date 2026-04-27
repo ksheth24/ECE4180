@@ -2,6 +2,12 @@
 #include "board_config.h"
 #include <shapes_inferencing.h>
 #include "edge-impulse-sdk/dsp/image/image.hpp"
+#include <WiFi.h>
+#include <WebServer.h>
+
+/* WiFi credentials */
+const char* WIFI_SSID = "Sheth";
+const char* WIFI_PASS = "123456789";
 
 /* Private variables */
 static bool debug_nn = false;
@@ -11,6 +17,111 @@ uint8_t *snapshot_buf;
 #define EI_CAMERA_RAW_FRAME_BUFFER_ROWS  240
 #define EI_CAMERA_FRAME_BYTE_SIZE        3
 
+#define MAX_RESULTS  50
+#define VOTE_SAMPLES  5
+
+WebServer server(80);
+
+// ── Last captured JPEG ─────────────────────────────────
+uint8_t *lastJpegBuf = nullptr;
+size_t   lastJpegLen = 0;
+
+// ── Result ring buffer ─────────────────────────────────
+struct Result {
+  String label;
+  String timestamp;
+};
+Result results[MAX_RESULTS];
+int resultCount = 0;
+int resultHead  = 0;
+
+void addResult(const String& label) {
+  int idx = (resultHead + resultCount) % MAX_RESULTS;
+  results[idx].label     = label;
+  results[idx].timestamp = String(millis() / 1000) + "s";
+
+  if (resultCount < MAX_RESULTS) {
+    resultCount++;
+  } else {
+    resultHead = (resultHead + 1) % MAX_RESULTS;
+  }
+}
+
+// ── HTTP handlers ──────────────────────────────────────
+void handleImage() {
+  if (lastJpegBuf == nullptr || lastJpegLen == 0) {
+    server.send(404, "text/plain", "No image captured yet");
+    return;
+  }
+  server.sendHeader("Cache-Control", "no-cache, no-store");
+  server.send_P(200, "image/jpeg", (const char*)lastJpegBuf, lastJpegLen);
+}
+
+void handleRoot() {
+  String html = "<!DOCTYPE html><html>"
+    "<head>"
+    "<meta charset='UTF-8'>"
+    "<meta http-equiv='refresh' content='3'>"
+    "<title>ESP32 Classifier</title>"
+    "<style>"
+    "body{font-family:monospace;background:#111;color:#0f0;padding:20px;}"
+    "h1{color:#fff;}"
+    "img{display:block;margin:16px 0;border:2px solid #333;width:320px;height:240px;}"
+    "table{border-collapse:collapse;width:100%;max-width:500px;margin-top:16px;}"
+    "th,td{border:1px solid #333;padding:8px 16px;text-align:left;}"
+    "th{background:#222;color:#aaa;}"
+    "tr:last-child td{color:#ff0;}"
+    "</style>"
+    "</head>"
+    "<body>"
+    "<h1>Classification Results</h1>"
+    "<p style='color:#555'>Auto-refreshes every 3s &nbsp;|&nbsp; ";
+
+  html += String(resultCount) + " result(s) stored</p>";
+  html += "<img src='/image' alt='Last captured frame'>";
+  html += "<table><tr><th>#</th><th>Uptime</th><th>Label</th></tr>";
+
+  for (int i = resultCount - 1; i >= 0; i--) {
+    int idx = (resultHead + i) % MAX_RESULTS;
+    html += "<tr><td>" + String(i + 1) + "</td>"
+          + "<td>" + results[idx].timestamp + "</td>"
+          + "<td>" + results[idx].label     + "</td></tr>";
+  }
+
+  html += "</table></body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleJson() {
+  String json = "[";
+  for (int i = resultCount - 1; i >= 0; i--) {
+    int idx = (resultHead + i) % MAX_RESULTS;
+    if (i < resultCount - 1) json += ",";
+    json += "{\"label\":\"" + results[idx].label
+          + "\",\"t\":\""  + results[idx].timestamp + "\"}";
+  }
+  json += "]";
+  server.send(200, "application/json", json);
+}
+
+// ── WiFi + web server init ─────────────────────────────
+void initWiFi() {
+  Serial.printf("Connecting to %s", WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.printf("\nWiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+
+  server.on("/",      handleRoot);
+  server.on("/json",  handleJson);
+  server.on("/image", handleImage);
+  server.begin();
+  Serial.println("Web server started.");
+}
+
+// ── Camera init ────────────────────────────────────────
 void initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -53,6 +164,7 @@ void initCamera() {
   Serial.println("Camera initialised");
 }
 
+// ── Edge Impulse data callback ─────────────────────────
 static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
   size_t pixel_ix    = offset * 3;
   size_t pixels_left = length;
@@ -69,22 +181,33 @@ static int ei_camera_get_data(size_t offset, size_t length, float *out_ptr) {
   return 0;
 }
 
-// Returns the winning label as a String, or "error" on failure
-String captureAndClassify() {
+// ── Run classifier on one frame, return best label ─────
+String classifyOnce(bool saveJpeg) {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("# ERR: Frame capture failed");
+    return "error";
+  }
+
+  if (saveJpeg) {
+    if (lastJpegBuf) { free(lastJpegBuf); lastJpegBuf = nullptr; lastJpegLen = 0; }
+    lastJpegBuf = (uint8_t*)malloc(fb->len);
+    if (lastJpegBuf) {
+      memcpy(lastJpegBuf, fb->buf, fb->len);
+      lastJpegLen = fb->len;
+    } else {
+      Serial.println("# WARN: Could not allocate JPEG buffer");
+    }
+  }
+
   snapshot_buf = (uint8_t*)malloc(
     EI_CAMERA_RAW_FRAME_BUFFER_COLS *
     EI_CAMERA_RAW_FRAME_BUFFER_ROWS *
     EI_CAMERA_FRAME_BYTE_SIZE
   );
   if (!snapshot_buf) {
-    Serial.println("ERR: Failed to allocate snapshot buffer");
-    return "error";
-  }
-
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("ERR: Frame capture failed");
-    free(snapshot_buf);
+    Serial.println("# ERR: Failed to allocate snapshot buffer");
+    esp_camera_fb_return(fb);
     return "error";
   }
 
@@ -92,7 +215,7 @@ String captureAndClassify() {
   esp_camera_fb_return(fb);
 
   if (!converted) {
-    Serial.println("ERR: JPEG to RGB888 conversion failed");
+    Serial.println("# ERR: JPEG to RGB888 conversion failed");
     free(snapshot_buf);
     return "error";
   }
@@ -116,23 +239,20 @@ String captureAndClassify() {
   ei_impulse_result_t result = { 0 };
   EI_IMPULSE_ERROR err = run_classifier(&signal, &result, debug_nn);
 
+  free(snapshot_buf);
+
   if (err != EI_IMPULSE_OK) {
-    Serial.printf("ERR: Classifier failed (%d)\n", err);
-    free(snapshot_buf);
+    Serial.printf("# ERR: Classifier failed (%d)\n", err);
     return "error";
   }
 
-  // Find the label with the highest confidence score
   String bestLabel = "unknown";
   float  bestScore = -1.0f;
 
 #if EI_CLASSIFIER_OBJECT_DETECTION == 1
   for (uint32_t i = 0; i < result.bounding_boxes_count; i++) {
     ei_impulse_result_bounding_box_t bb = result.bounding_boxes[i];
-    if (bb.value > bestScore) {
-      bestScore = bb.value;
-      bestLabel = String(bb.label);
-    }
+    if (bb.value > bestScore) { bestScore = bb.value; bestLabel = String(bb.label); }
   }
 #else
   for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
@@ -143,27 +263,59 @@ String captureAndClassify() {
   }
 #endif
 
-  free(snapshot_buf);
   return bestLabel;
 }
 
+// ── Majority-vote across VOTE_SAMPLES shots ────────────
+String captureAndClassify() {
+  String votes[VOTE_SAMPLES];
+
+  for (int i = 0; i < VOTE_SAMPLES; i++) {
+    bool isLast = (i == VOTE_SAMPLES - 1);
+    votes[i] = classifyOnce(isLast);
+    Serial.printf("# Vote %d/%d: %s\n", i + 1, VOTE_SAMPLES, votes[i].c_str());
+    server.handleClient();
+  }
+
+  String winnerLabel = "unknown";
+  int    winnerCount = 0;
+
+  for (int i = 0; i < VOTE_SAMPLES; i++) {
+    if (votes[i] == "error") continue;
+    int count = 0;
+    for (int j = 0; j < VOTE_SAMPLES; j++) {
+      if (votes[j] == votes[i]) count++;
+    }
+    if (count > winnerCount) {
+      winnerCount = count;
+      winnerLabel = votes[i];
+    }
+  }
+
+  Serial.printf("# Majority: %s (%d/%d)\n", winnerLabel.c_str(), winnerCount, VOTE_SAMPLES);
+  return winnerLabel;
+}
+
+// ── Arduino entry points ───────────────────────────────
 void setup() {
   Serial.begin(115200);
   while (!Serial);
-  Serial.println("Ready. Send 'active' to trigger inference.");
+  initWiFi();
   initCamera();
+  Serial.println("# Ready. Send 'active' to trigger inference.");
 }
 
 void loop() {
+  server.handleClient();
+
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
     if (cmd.equalsIgnoreCase("active")) {
-      Serial.println("Triggered — capturing image...");
-      String result = captureAndClassify();
-      // Send back just the label so the other board can parse it easily
-      Serial.println(result);
+      String label = captureAndClassify();
+      Serial.println(label);  // ← only this line goes to the sensor board
+      addResult(label);
     }
   }
 }
