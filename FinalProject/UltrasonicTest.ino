@@ -2,34 +2,39 @@
 
 #define TRIG 8
 #define ECHO 7
-
 #define SERVO_PIN 21
 #define BUZZER 5
 #define TX 43
 #define RX 44
-
 #define IR 37
+
 Servo myServo;
 
-volatile bool detected = false;
+volatile bool detected      = false;
+volatile bool enemyDetected = false;
+volatile bool isTriangle    = false;  // ← new, separates "something seen" from "triangle seen"
+
+long getDistance();
+String waitForResponse(unsigned long timeoutMs);
 
 void servoTask(void *pvParameters) {
   myServo.attach(SERVO_PIN);
   myServo.write(0);
 
-  int servoAngle = 0;
-  bool goLeft = true;
+  int  servoAngle = 0;
+  bool goLeft     = true;
 
   for (;;) {
-    if (goLeft) {
-      servoAngle++;
-      if (servoAngle >= 180) goLeft = false;
-    } else {
-      servoAngle--;
-      if (servoAngle <= 0) goLeft = true;
+    if (!isTriangle) {  // ← only pause on triangle, circle keeps sweeping
+      if (goLeft) {
+        servoAngle++;
+        if (servoAngle >= 180) goLeft = false;
+      } else {
+        servoAngle--;
+        if (servoAngle <= 0) goLeft = true;
+      }
+      myServo.write(servoAngle);
     }
-
-    myServo.write(servoAngle);
     vTaskDelay(pdMS_TO_TICKS(15));
   }
 }
@@ -41,34 +46,52 @@ void sensorTask(void *pvParameters) {
     Serial.print("Distance: ");
     Serial.println(distance);
 
-    detected = (distance != -1 && distance <= 8);
+    detected = (distance > 0 && distance <= 24);
 
     if (detected) {
-      // Send "active" and wait for response
+      // Don't keep spamming the camera if we already know it's a triangle
+      if (isTriangle) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        continue;
+      }
+
       Serial1.println("active");
       Serial.println("Sent: active");
 
-      String response = waitForResponse(2000); // 2 second timeout
+      String response = waitForResponse(2000);
       Serial.print("Received: ");
       Serial.println(response);
 
-      if (response == "circle") {
-        // Trigger buzzer and laser only for circle
-        ledcWrite(BUZZER, 128);
-        digitalWrite(IR, HIGH);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        ledcWrite(BUZZER, 0);
-        digitalWrite(IR, LOW);
-      }
-      // If "triangle" or anything else, do nothing
+      isTriangle    = (response == "triangle");
+      enemyDetected = (response == "triangle");  // buzzer/IR only on triangle too
 
+    } else {
+      // Nothing in range — reset everything
+      detected      = false;
+      isTriangle    = false;
+      enemyDetected = false;
     }
 
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
-// Waits up to timeoutMs for a response on Serial1
+void loudAhhShiz(void *pvParameters) {
+  for (;;) {
+    if (enemyDetected) {
+      ledcWrite(BUZZER, 128);
+      digitalWrite(IR, HIGH);
+      vTaskDelay(pdMS_TO_TICKS(100));
+      ledcWrite(BUZZER, 0);
+      digitalWrite(IR, LOW);
+    } else {
+      ledcWrite(BUZZER, 0);
+      digitalWrite(IR, LOW);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
 String waitForResponse(unsigned long timeoutMs) {
   String result = "";
   unsigned long start = millis();
@@ -76,13 +99,12 @@ String waitForResponse(unsigned long timeoutMs) {
   while (millis() - start < timeoutMs) {
     if (Serial1.available()) {
       result = Serial1.readStringUntil('\n');
-      result.trim(); // Remove \r\n whitespace
+      result.trim();
       if (result.length() > 0) return result;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
-
-  return ""; // Timeout, empty response
+  return "";
 }
 
 long getDistance() {
@@ -99,7 +121,7 @@ long getDistance() {
 
 void setup() {
   Serial.begin(115200);
-  Serial1.begin(115200, SERIAL_8N1, RX, TX); // RX=44, TX=43
+  Serial1.begin(115200, SERIAL_8N1, RX, TX);
 
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
@@ -107,8 +129,9 @@ void setup() {
 
   ledcAttachChannel(BUZZER, 2000, 12, 2);
 
-  xTaskCreatePinnedToCore(servoTask,  "ServoTask",  2048, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(sensorTask, "SensorTask", 2048, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(servoTask,   "ServoTask",   3072, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(sensorTask,  "SensorTask",  6144, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(loudAhhShiz, "LoudAhhShiz", 3072, NULL, 2, NULL, 1);
 }
 
 void loop() {
